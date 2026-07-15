@@ -24,4 +24,13 @@ export type RootStackParamList = {
     competencyId?: string;
     initialCategory?: CompetencyCategory;
   };
+
+  Firearms: {
+    clientId: string;
+  };
+
+  FirearmForm: {
+    clientId: string;
+    firearmId?: string;
+  };
 };

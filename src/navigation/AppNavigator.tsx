@@ -5,12 +5,14 @@ import {
 } from '@react-navigation/native';
 import {
   Pressable,
-  Text,
   StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   ShieldCheck,
+  Target,
 } from 'lucide-react-native';
 
 import ClientFormScreen from '../screens/ClientFormScreen';
@@ -19,6 +21,8 @@ import ClientsScreen from '../screens/ClientsScreen';
 import CompetenciesScreen from '../screens/CompetenciesScreen';
 import CompetencyFormScreen from '../screens/CompetencyFormScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import FirearmFormScreen from '../screens/FirearmFormScreen';
+import FirearmsScreen from '../screens/FirearmsScreen';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
@@ -95,34 +99,65 @@ export default function AppNavigator() {
           options={({ navigation, route }) => ({
             title: 'Client profile',
             headerRight: () => (
-              <Pressable
-                onPress={() =>
-                  navigation.navigate(
-                    'Competencies',
-                    {
-                      clientId:
-                        route.params.clientId,
-                    }
-                  )
-                }
-                style={({ pressed }) => [
-                  styles.headerAction,
-                  pressed
-                    ? styles.headerActionPressed
-                    : null,
-                ]}
-              >
-                <ShieldCheck
-                  color={Colors.primary}
-                  size={17}
-                />
-
-                <Text
-                  style={styles.headerActionText}
+              <View style={styles.headerActions}>
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate(
+                      'Competencies',
+                      {
+                        clientId:
+                          route.params.clientId,
+                      }
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    pressed
+                      ? styles.headerActionPressed
+                      : null,
+                  ]}
                 >
-                  Competencies
-                </Text>
-              </Pressable>
+                  <ShieldCheck
+                    color={Colors.primary}
+                    size={17}
+                  />
+
+                  <Text
+                    style={styles.headerActionText}
+                  >
+                    Competencies
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate(
+                      'Firearms',
+                      {
+                        clientId:
+                          route.params.clientId,
+                      }
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    pressed
+                      ? styles.headerActionPressed
+                      : null,
+                  ]}
+                >
+                  <Target
+                    color={Colors.primary}
+                    size={17}
+                  />
+
+                  <Text
+                    style={styles.headerActionText}
+                  >
+                    Firearms
+                  </Text>
+                </Pressable>
+              </View>
             ),
           })}
         />
@@ -144,12 +179,34 @@ export default function AppNavigator() {
               : 'Add competency',
           })}
         />
+
+        <Stack.Screen
+          component={FirearmsScreen}
+          name="Firearms"
+          options={{
+            title: 'Firearms',
+          }}
+        />
+
+        <Stack.Screen
+          component={FirearmFormScreen}
+          name="FirearmForm"
+          options={({ route }) => ({
+            title: route.params.firearmId
+              ? 'Edit firearm'
+              : 'Add firearm',
+          })}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  headerActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
   headerAction: {
     alignItems: 'center',
     backgroundColor: Colors.primarySoft,
