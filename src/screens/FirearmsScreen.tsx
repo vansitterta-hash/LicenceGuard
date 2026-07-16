@@ -247,7 +247,7 @@ export default function FirearmsScreen({
 
         <SummaryCard
           icon={CalendarClock}
-          label="Renewal attention"
+          label="Application attention"
           value={dueCount}
         />
 

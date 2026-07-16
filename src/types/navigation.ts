@@ -33,4 +33,13 @@ export type RootStackParamList = {
     clientId: string;
     firearmId?: string;
   };
+
+  ApplicationCases: {
+    clientId: string;
+  };
+
+  ApplicationCaseForm: {
+    clientId: string;
+    applicationCaseId?: string;
+  };
 };

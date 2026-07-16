@@ -364,7 +364,7 @@ export default function ClientProfileScreen({
 
         <SummaryCard
           icon={TriangleAlert}
-          label="Open renewals"
+          label="Open applications"
           value={readiness.counts.openRenewals}
         />
 
@@ -432,7 +432,7 @@ export default function ClientProfileScreen({
 
         <Card
           style={styles.columnCard}
-          title="Renewal attention"
+          title="Application attention"
         >
           {readiness.issues.length === 0 &&
           readiness.warnings.length === 0 ? (

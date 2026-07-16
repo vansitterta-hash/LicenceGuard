@@ -210,7 +210,7 @@ export default function ClientsScreen({ navigation }: Props) {
           </Text>
 
           <Text style={styles.subtitle}>
-            Find a client quickly or create a new renewal record.
+            Find a client quickly or create a new application record.
           </Text>
         </View>
 

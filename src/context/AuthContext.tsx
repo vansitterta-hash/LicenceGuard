@@ -31,9 +31,24 @@ type AuthProviderProps = {
   children: ReactNode;
 };
 
+type DealerUserRow = {
+  dealer_id: string;
+  role: DealerProfile['role'];
+  full_name: string | null;
+  dealers:
+    | {
+        name: string;
+      }
+    | Array<{
+        name: string;
+      }>
+    | null;
+};
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
-  const [dealerProfile, setDealerProfile] = useState<DealerProfile | null>(null);
+  const [dealerProfile, setDealerProfile] =
+    useState<DealerProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadDealerProfile = async (userId: string) => {
@@ -51,21 +66,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
       )
       .eq('user_id', userId)
       .eq('is_active', true)
-      .single();
+      .order('created_at', { ascending: true })
+      .limit(2);
 
     if (error) {
       throw new Error(error.message);
     }
 
-    const dealer = Array.isArray(data.dealers)
-      ? data.dealers[0]
-      : data.dealers;
+    const rows = (data ?? []) as DealerUserRow[];
+
+    if (rows.length === 0) {
+      setDealerProfile(null);
+      throw new Error(
+        'This user is not linked to an active LicenceGuard dealer.'
+      );
+    }
+
+    if (rows.length > 1) {
+      setDealerProfile(null);
+      throw new Error(
+        'This user is linked to more than one active dealer. Resolve the duplicate dealer membership before continuing.'
+      );
+    }
+
+    const membership = rows[0];
+    const dealer = Array.isArray(membership.dealers)
+      ? membership.dealers[0]
+      : membership.dealers;
+
+    if (!dealer) {
+      setDealerProfile(null);
+      throw new Error(
+        'The active dealer membership is not linked to a valid dealer record.'
+      );
+    }
 
     setDealerProfile({
-      dealerId: data.dealer_id,
-      dealerName: dealer?.name ?? 'LicenceGuard Dealer',
-      role: data.role,
-      fullName: data.full_name,
+      dealerId: membership.dealer_id,
+      dealerName: dealer.name,
+      role: membership.role,
+      fullName: membership.full_name,
     });
   };
 
@@ -86,7 +126,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (currentSession?.user) {
           await loadDealerProfile(currentSession.user.id);
+        } else {
+          setDealerProfile(null);
         }
+      } catch (error) {
+        console.error('LicenceGuard authentication initialisation failed:', error);
+        setDealerProfile(null);
       } finally {
         if (mounted) {
           setLoading(false);
@@ -99,15 +144,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      setLoading(true);
       setSession(nextSession);
 
-      if (nextSession?.user) {
-        await loadDealerProfile(nextSession.user.id);
-      } else {
-        setDealerProfile(null);
+      try {
+        if (nextSession?.user) {
+          await loadDealerProfile(nextSession.user.id);
+        } else {
+          setDealerProfile(null);
+        }
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     });
 
     return () => {
@@ -130,10 +178,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (!data.user) {
-        throw new Error('Login succeeded, but no user account was returned.');
+        throw new Error(
+          'Login succeeded, but no user account was returned.'
+        );
       }
 
       await loadDealerProfile(data.user.id);
+    } catch (error) {
+      await supabase.auth.signOut();
+      setSession(null);
+      setDealerProfile(null);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -168,7 +223,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     [dealerProfile, loading, session]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

@@ -1,6 +1,7 @@
 import {
   ActivityIndicator,
   Alert,
+  Image,
   StyleSheet,
   Text,
   View,
@@ -26,6 +27,8 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { RootStackParamList } from '../types/navigation';
 
+const licenceGuardLogo = require('../../assets/LicenceGuard Logo.png');
+
 type Props = NativeStackScreenProps<
   RootStackParamList,
   'Dashboard'
@@ -43,7 +46,7 @@ const summaryCards = [
     icon: CalendarClock,
   },
   {
-    label: 'Open renewal cases',
+    label: 'Open application cases',
     value: '0',
     icon: FileCheck2,
   },
@@ -95,21 +98,32 @@ export default function DashboardScreen({
       <View
         style={[
           styles.header,
-          isCompact ? styles.headerCompact : null,
+          isCompact
+            ? styles.headerCompact
+            : null,
         ]}
       >
         <View style={styles.brandBlock}>
           <View style={styles.logoFrame}>
-            <Text style={styles.logoLetter}>L</Text>
+            <Image
+              accessibilityLabel="LicenceGuard"
+              resizeMode="contain"
+              source={licenceGuardLogo}
+              style={styles.logo}
+            />
           </View>
 
           <View style={styles.brandText}>
             <Text style={styles.brandName}>
-              LicenceGuard Desk
+              LicenceGuard
             </Text>
 
             <Text style={styles.brandSubtitle}>
-              Firearm Licence Renewal Management
+              FIREARM COMPETENCY &amp; LICENCE MANAGEMENT
+            </Text>
+
+            <Text style={styles.brandTagline}>
+              PROTECT • COMPLY • RENEW
             </Text>
           </View>
         </View>
@@ -135,7 +149,7 @@ export default function DashboardScreen({
         style={styles.heroCard}
       >
         <Text style={styles.eyebrow}>
-          DEALER RENEWAL DESK
+          DEALER APPLICATION WORKSPACE
         </Text>
 
         <Text style={styles.heroTitle}>
@@ -151,8 +165,9 @@ export default function DashboardScreen({
         </Text>
 
         <Text style={styles.heroText}>
-          Find clients, monitor firearm licence and competency expiry dates,
-          and prepare renewals before deadlines become problems.
+          Manage clients, competencies, firearm licences,
+          first and additional applications, renewals,
+          reapplications and final outcomes.
         </Text>
 
         <Button
@@ -162,14 +177,16 @@ export default function DashboardScreen({
               size={20}
             />
           }
-          onPress={() => navigation.navigate('Clients')}
+          onPress={() =>
+            navigation.navigate('Clients')
+          }
           style={styles.heroButton}
           title="Search or add a client"
         />
       </Card>
 
       <Text style={styles.sectionTitle}>
-        Renewal overview
+        Compliance overview
       </Text>
 
       <View style={styles.summaryGrid}>
@@ -205,8 +222,8 @@ export default function DashboardScreen({
         title="Client management"
       >
         <Text style={styles.moduleText}>
-          The Clients screen is now connected to the application navigation
-          and Supabase client service.
+          Open a client profile to manage competencies,
+          firearms, licences and application cases.
         </Text>
 
         <Button
@@ -216,7 +233,9 @@ export default function DashboardScreen({
               size={19}
             />
           }
-          onPress={() => navigation.navigate('Clients')}
+          onPress={() =>
+            navigation.navigate('Clients')
+          }
           style={styles.moduleButton}
           title="Open clients"
           variant="secondary"
@@ -237,7 +256,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: Spacing.xxl,
+    marginBottom: Spacing.lg,
   },
   headerCompact: {
     alignItems: 'stretch',
@@ -251,18 +270,18 @@ const styles = StyleSheet.create({
   },
   logoFrame: {
     alignItems: 'center',
-    backgroundColor: Colors.primarySoft,
-    borderColor: Colors.primary,
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.primaryDark,
     borderRadius: Radius.lg,
     borderWidth: 1,
-    height: 52,
+    height: 76,
     justifyContent: 'center',
-    width: 52,
+    overflow: 'hidden',
+    width: 76,
   },
-  logoLetter: {
-    color: Colors.silver,
-    fontSize: 26,
-    fontWeight: '800',
+  logo: {
+    height: 72,
+    width: 72,
   },
   brandText: {
     flexShrink: 1,
@@ -274,11 +293,17 @@ const styles = StyleSheet.create({
   },
   brandSubtitle: {
     ...Typography.caption,
-    color: Colors.primary,
+    color: Colors.silver,
     fontWeight: '800',
     letterSpacing: 0.7,
     marginTop: Spacing.xxs,
-    textTransform: 'uppercase',
+  },
+  brandTagline: {
+    ...Typography.caption,
+    color: Colors.primary,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginTop: Spacing.xxs,
   },
   heroCard: {
     borderColor: Colors.primaryDark,
@@ -301,7 +326,7 @@ const styles = StyleSheet.create({
     ...Typography.body,
     color: Colors.textMuted,
     marginTop: Spacing.md,
-    maxWidth: 720,
+    maxWidth: 760,
   },
   heroButton: {
     alignSelf: 'flex-start',
@@ -311,7 +336,7 @@ const styles = StyleSheet.create({
     ...Typography.sectionTitle,
     color: Colors.white,
     marginBottom: Spacing.md,
-    marginTop: Spacing.xxxl,
+    marginTop: Spacing.lg,
   },
   summaryGrid: {
     flexDirection: 'row',

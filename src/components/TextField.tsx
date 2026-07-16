@@ -1,4 +1,7 @@
-import type { ReactNode } from 'react';
+import {
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   StyleSheet,
   Text,
@@ -34,8 +37,11 @@ export default function TextField({
   multiline = false,
   containerStyle,
   style,
+  onFocus,
+  onBlur,
   ...inputProps
 }: TextFieldProps) {
+  const [focused, setFocused] = useState(false);
   const supportingText = error || helperText;
 
   return (
@@ -50,6 +56,7 @@ export default function TextField({
       <View
         style={[
           styles.inputWrapper,
+          focused ? styles.inputWrapperFocused : null,
           multiline ? styles.multilineWrapper : null,
           error ? styles.inputWrapperError : null,
           !editable ? styles.inputWrapperDisabled : null,
@@ -63,6 +70,14 @@ export default function TextField({
           {...inputProps}
           editable={editable}
           multiline={multiline}
+          onBlur={(event) => {
+            setFocused(false);
+            onBlur?.(event);
+          }}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus?.(event);
+          }}
           placeholderTextColor={Colors.textMuted}
           style={[
             styles.input,
@@ -101,7 +116,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   required: {
-    color: Colors.primary,
+    color: Colors.primaryLight,
   },
   inputWrapper: {
     alignItems: 'center',
@@ -112,6 +127,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     minHeight: 48,
     paddingHorizontal: Spacing.md,
+  },
+  inputWrapperFocused: {
+    borderColor: Colors.primaryLight,
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 0,
+    },
+    shadowOpacity: 0.24,
+    shadowRadius: 8,
+    elevation: 2,
   },
   multilineWrapper: {
     alignItems: 'flex-start',

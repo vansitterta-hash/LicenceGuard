@@ -2,17 +2,23 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { LockKeyhole, Mail, ShieldCheck } from 'lucide-react-native';
+import { LockKeyhole, Mail } from 'lucide-react-native';
+
 import { useAuth } from '../context/AuthContext';
+import { Colors } from '../theme/colors';
+
+const licenceGuardLogo = require('../../assets/LicenceGuard Logo.png');
 
 export default function LoginScreen() {
   const { signIn, loading } = useAuth();
@@ -22,113 +28,166 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Missing details', 'Enter your email address and password.');
+      Alert.alert(
+        'Missing details',
+        'Enter your email address and password.'
+      );
       return;
     }
 
     try {
-      await signIn(email, password);
+      await signIn(email.trim(), password);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unable to sign in.';
-
-      Alert.alert('Login failed', message);
+      Alert.alert(
+        'Login failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to sign in.'
+      );
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={
+          Platform.OS === 'ios' ? 'padding' : undefined
+        }
         style={styles.keyboardView}
       >
-        <View style={styles.container}>
-          <View style={styles.brandSection}>
-            <View style={styles.logoMark}>
-              <ShieldCheck color="#071B2D" size={34} strokeWidth={2.4} />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
+          <View style={styles.container}>
+            <View style={styles.brandSection}>
+              <Image
+                accessibilityLabel="LicenceGuard"
+                resizeMode="contain"
+                source={licenceGuardLogo}
+                style={styles.logo}
+              />
+
+              <Text style={styles.brandSubtitle}>
+                FIREARM COMPETENCY &amp; LICENCE MANAGEMENT
+              </Text>
+
+              <Text style={styles.tagline}>
+                PROTECT • COMPLY • RENEW
+              </Text>
             </View>
 
-            <Text style={styles.brandName}>LicenceGuard Desk</Text>
-            <Text style={styles.brandSubtitle}>
-              Firearm Licence Renewal Management
+            <View style={styles.card}>
+              <Text style={styles.eyebrow}>
+                SECURE LICENCEGUARD ACCESS
+              </Text>
+
+              <Text style={styles.title}>
+                Sign in
+              </Text>
+
+              <Text style={styles.description}>
+                Access client applications, competencies,
+                firearm licences, expiry alerts and
+                application preparation workflows.
+              </Text>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>
+                  Email address
+                </Text>
+
+                <View style={styles.inputWrapper}>
+                  <Mail
+                    color={Colors.silverDark}
+                    size={19}
+                  />
+
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    keyboardType="email-address"
+                    onChangeText={setEmail}
+                    placeholder="you@example.com"
+                    placeholderTextColor={Colors.silverDark}
+                    style={styles.input}
+                    value={email}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>
+                  Password
+                </Text>
+
+                <View style={styles.inputWrapper}>
+                  <LockKeyhole
+                    color={Colors.silverDark}
+                    size={19}
+                  />
+
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="password"
+                    onChangeText={setPassword}
+                    onSubmitEditing={() => {
+                      void handleLogin();
+                    }}
+                    placeholder="Enter your password"
+                    placeholderTextColor={Colors.silverDark}
+                    secureTextEntry
+                    style={styles.input}
+                    value={password}
+                  />
+                </View>
+              </View>
+
+              <Pressable
+                disabled={loading}
+                onPress={() => {
+                  void handleLogin();
+                }}
+                style={({ pressed }) => [
+                  styles.loginButton,
+                  pressed && !loading
+                    ? styles.loginButtonPressed
+                    : null,
+                  loading
+                    ? styles.loginButtonDisabled
+                    : null,
+                ]}
+              >
+                <View pointerEvents="none" style={styles.loginUpperBand} />
+                <View pointerEvents="none" style={styles.loginReflection} />
+                <View pointerEvents="none" style={styles.loginLowerBand} />
+                <View pointerEvents="none" style={styles.loginBottomEdge} />
+
+                {loading ? (
+                  <ActivityIndicator
+                    color={Colors.white}
+                  />
+                ) : (
+                  <Text style={styles.loginButtonText}>
+                    Sign in
+                  </Text>
+                )}
+              </Pressable>
+
+              <Text style={styles.helpText}>
+                Use an authorised LicenceGuard dealer
+                account.
+              </Text>
+            </View>
+
+            <Text style={styles.footerText}>
+              Manage first applications, additional
+              applications, renewals, reapplications and
+              final outcomes in one secure workspace.
             </Text>
           </View>
-
-          <View style={styles.card}>
-            <Text style={styles.eyebrow}>SECURE DEALER ACCESS</Text>
-            <Text style={styles.title}>Sign in</Text>
-            <Text style={styles.description}>
-              Access client renewals, licence expiry alerts, competencies, and
-              renewal preparation work.
-            </Text>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Email address</Text>
-
-              <View style={styles.inputWrapper}>
-                <Mail color="#7F96A8" size={19} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  placeholderTextColor="#718799"
-                  style={styles.input}
-                  value={email}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Password</Text>
-
-              <View style={styles.inputWrapper}>
-                <LockKeyhole color="#7F96A8" size={19} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="password"
-                  onChangeText={setPassword}
-                  onSubmitEditing={() => {
-                    void handleLogin();
-                  }}
-                  placeholder="Enter your password"
-                  placeholderTextColor="#718799"
-                  secureTextEntry
-                  style={styles.input}
-                  value={password}
-                />
-              </View>
-            </View>
-
-            <Pressable
-              disabled={loading}
-              onPress={() => {
-                void handleLogin();
-              }}
-              style={({ pressed }) => [
-                styles.loginButton,
-                pressed && !loading ? styles.loginButtonPressed : null,
-                loading ? styles.loginButtonDisabled : null,
-              ]}
-            >
-              {loading ? (
-                <ActivityIndicator color="#071B2D" />
-              ) : (
-                <Text style={styles.loginButtonText}>Sign in</Text>
-              )}
-            </Pressable>
-
-            <Text style={styles.helpText}>
-              Use the dealer owner account created in Supabase Authentication.
-            </Text>
-          </View>
-
-          <Text style={styles.footerText}>
-            LicenceGuard Desk keeps firearm licence and competency renewals
-            organised before deadlines become problems.
-          </Text>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -136,109 +195,162 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   safeArea: {
+    backgroundColor: Colors.background,
     flex: 1,
-    backgroundColor: '#071B2D',
   },
   keyboardView: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   container: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 28,
+    paddingHorizontal: 18,
+    paddingVertical: 6,
   },
   brandSection: {
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 6,
   },
-  logoMark: {
-    alignItems: 'center',
-    backgroundColor: '#C89B3C',
-    borderRadius: 20,
-    height: 64,
-    justifyContent: 'center',
-    marginBottom: 14,
-    width: 64,
-  },
-  brandName: {
-    color: '#FFFFFF',
-    fontSize: 27,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-    textAlign: 'center',
+  logo: {
+    height: 154,
+    maxWidth: 440,
+    width: '80%',
   },
   brandSubtitle: {
-    color: '#C89B3C',
+    color: Colors.silver,
     fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginTop: 6,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: 3,
     textAlign: 'center',
-    textTransform: 'uppercase',
+  },
+  tagline: {
+    color: Colors.primaryLight,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    marginTop: 3,
+    textAlign: 'center',
   },
   card: {
     alignSelf: 'center',
-    backgroundColor: '#102B42',
-    borderColor: '#23445E',
-    borderRadius: 20,
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.primaryLight,
+    borderRadius: 18,
     borderWidth: 1,
-    maxWidth: 460,
-    padding: 22,
+    maxWidth: 430,
+    padding: 14,
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
     width: '100%',
   },
   eyebrow: {
-    color: '#C89B3C',
+    color: Colors.primary,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1,
   },
   title: {
-    color: '#FFFFFF',
-    fontSize: 27,
+    color: Colors.white,
+    fontSize: 24,
     fontWeight: '800',
-    marginTop: 8,
+    marginTop: 4,
   },
   description: {
-    color: '#B9C8D4',
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 9,
+    color: Colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 5,
   },
   fieldGroup: {
-    marginTop: 20,
+    marginTop: 11,
   },
   label: {
-    color: '#DCE5EB',
+    color: Colors.text,
     fontSize: 13,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 5,
   },
   inputWrapper: {
     alignItems: 'center',
-    backgroundColor: '#0A2134',
-    borderColor: '#2B4B63',
+    backgroundColor: Colors.surface,
+    borderColor: Colors.borderStrong,
     borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
-    minHeight: 52,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    paddingHorizontal: 12,
   },
   input: {
-    color: '#FFFFFF',
+    color: Colors.white,
     flex: 1,
     fontSize: 15,
     marginLeft: 10,
-    paddingVertical: 13,
+    paddingVertical: 10,
   },
   loginButton: {
     alignItems: 'center',
-    backgroundColor: '#C89B3C',
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primaryLight,
     borderRadius: 12,
+    borderWidth: 1,
     justifyContent: 'center',
-    marginTop: 24,
-    minHeight: 52,
+    marginTop: 14,
+    minHeight: 46,
+    overflow: 'hidden',
     paddingHorizontal: 18,
+    position: 'relative',
+    shadowColor: Colors.primaryDark,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.36,
+    shadowRadius: 10,
+  },
+  loginUpperBand: {
+    backgroundColor: Colors.primaryLight,
+    height: '34%',
+    left: 0,
+    opacity: 0.34,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  loginReflection: {
+    backgroundColor: Colors.primaryHighlight,
+    height: 1,
+    left: 14,
+    opacity: 0.95,
+    position: 'absolute',
+    right: 14,
+    top: 2,
+  },
+  loginLowerBand: {
+    backgroundColor: Colors.primaryDark,
+    bottom: 0,
+    height: '30%',
+    left: 0,
+    opacity: 0.4,
+    position: 'absolute',
+    right: 0,
+  },
+  loginBottomEdge: {
+    backgroundColor: Colors.primaryDeep,
+    bottom: 1,
+    height: 2,
+    left: 12,
+    opacity: 0.95,
+    position: 'absolute',
+    right: 12,
   },
   loginButtonPressed: {
     opacity: 0.86,
@@ -247,24 +359,24 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   loginButtonText: {
-    color: '#071B2D',
+    color: Colors.white,
     fontSize: 16,
     fontWeight: '800',
   },
   helpText: {
-    color: '#8FA2B2',
+    color: Colors.textMuted,
     fontSize: 12,
     lineHeight: 18,
-    marginTop: 15,
+    marginTop: 9,
     textAlign: 'center',
   },
   footerText: {
     alignSelf: 'center',
-    color: '#8FA2B2',
+    color: Colors.textMuted,
     fontSize: 12,
     lineHeight: 18,
-    marginTop: 22,
-    maxWidth: 460,
+    marginTop: 8,
+    maxWidth: 520,
     textAlign: 'center',
   },
 });

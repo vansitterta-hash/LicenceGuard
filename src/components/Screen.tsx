@@ -10,6 +10,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+
 import { Colors } from '../theme/colors';
 import { Spacing } from '../theme/spacing';
 
@@ -39,7 +40,7 @@ export default function Screen({
       ]}
       keyboardShouldPersistTaps="handled"
       refreshControl={refreshControl}
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
     >
       {children}
     </ScrollView>
@@ -60,7 +61,11 @@ export default function Screen({
     <SafeAreaView style={styles.safeArea}>
       {keyboardAvoiding ? (
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : undefined
+          }
           style={styles.flex}
         >
           {content}
@@ -82,8 +87,8 @@ const styles = StyleSheet.create({
   },
   content: {
     alignSelf: 'center',
-    padding: Spacing.xl,
-    paddingBottom: Spacing.section,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xxxl,
     width: '100%',
   },
   nonScrollContent: {

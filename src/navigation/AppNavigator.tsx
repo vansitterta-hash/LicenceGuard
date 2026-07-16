@@ -11,10 +11,13 @@ import {
 } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
+  FileCheck2,
   ShieldCheck,
   Target,
 } from 'lucide-react-native';
 
+import ApplicationCaseFormScreen from '../screens/ApplicationCaseFormScreen';
+import ApplicationCasesScreen from '../screens/ApplicationCasesScreen';
 import ClientFormScreen from '../screens/ClientFormScreen';
 import ClientProfileScreen from '../screens/ClientProfileScreen';
 import ClientsScreen from '../screens/ClientsScreen';
@@ -157,6 +160,35 @@ export default function AppNavigator() {
                     Firearms
                   </Text>
                 </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate(
+                      'ApplicationCases',
+                      {
+                        clientId:
+                          route.params.clientId,
+                      }
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    pressed
+                      ? styles.headerActionPressed
+                      : null,
+                  ]}
+                >
+                  <FileCheck2
+                    color={Colors.primary}
+                    size={17}
+                  />
+
+                  <Text
+                    style={styles.headerActionText}
+                  >
+                    Applications
+                  </Text>
+                </Pressable>
               </View>
             ),
           })}
@@ -195,6 +227,24 @@ export default function AppNavigator() {
             title: route.params.firearmId
               ? 'Edit firearm'
               : 'Add firearm',
+          })}
+        />
+
+        <Stack.Screen
+          component={ApplicationCasesScreen}
+          name="ApplicationCases"
+          options={{
+            title: 'Application cases',
+          }}
+        />
+
+        <Stack.Screen
+          component={ApplicationCaseFormScreen}
+          name="ApplicationCaseForm"
+          options={({ route }) => ({
+            title: route.params.applicationCaseId
+              ? 'Edit application case'
+              : 'Open application case',
           })}
         />
       </Stack.Navigator>

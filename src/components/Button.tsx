@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  View,
   type PressableProps,
   type StyleProp,
   type ViewStyle,
@@ -45,6 +46,8 @@ export default function Button({
   ...pressableProps
 }: ButtonProps) {
   const isDisabled = disabled || loading;
+  const isMetallic =
+    variant === 'primary' || variant === 'danger';
 
   return (
     <Pressable
@@ -65,6 +68,15 @@ export default function Button({
         style,
       ]}
     >
+      {isMetallic ? (
+        <>
+          <View pointerEvents="none" style={styles.metallicUpperBand} />
+          <View pointerEvents="none" style={styles.metallicReflection} />
+          <View pointerEvents="none" style={styles.metallicLowerBand} />
+          <View pointerEvents="none" style={styles.metallicBottomEdge} />
+        </>
+      ) : null}
+
       {loading ? (
         <ActivityIndicator
           color={
@@ -99,15 +111,31 @@ export default function Button({
 const variantStyles = StyleSheet.create({
   primary: {
     backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+    borderColor: Colors.primaryLight,
+    shadowColor: Colors.primaryDark,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.36,
+    shadowRadius: 10,
+    elevation: 5,
   },
   secondary: {
     backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.borderStrong,
+    borderColor: Colors.borderMetal,
   },
   danger: {
     backgroundColor: Colors.danger,
-    borderColor: Colors.danger,
+    borderColor: Colors.primaryLight,
+    shadowColor: Colors.primaryDark,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.34,
+    shadowRadius: 9,
+    elevation: 4,
   },
   ghost: {
     backgroundColor: 'transparent',
@@ -120,7 +148,7 @@ const titleVariantStyles = StyleSheet.create({
     color: Colors.white,
   },
   secondary: {
-    color: Colors.silver,
+    color: Colors.silverLight,
   },
   danger: {
     color: Colors.white,
@@ -142,7 +170,7 @@ const sizeStyles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   large: {
-    minHeight: 54,
+    minHeight: 52,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.lg,
   },
@@ -155,12 +183,51 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  metallicUpperBand: {
+    backgroundColor: Colors.primaryLight,
+    height: '33%',
+    left: 0,
+    opacity: 0.34,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  metallicReflection: {
+    backgroundColor: Colors.primaryHighlight,
+    height: 1,
+    left: 12,
+    opacity: 0.95,
+    position: 'absolute',
+    right: 12,
+    top: 2,
+  },
+  metallicLowerBand: {
+    backgroundColor: Colors.primaryDark,
+    bottom: 0,
+    height: '30%',
+    left: 0,
+    opacity: 0.38,
+    position: 'absolute',
+    right: 0,
+  },
+  metallicBottomEdge: {
+    backgroundColor: Colors.primaryDeep,
+    bottom: 1,
+    height: 2,
+    left: 10,
+    opacity: 0.95,
+    position: 'absolute',
+    right: 10,
   },
   fullWidth: {
     width: '100%',
   },
   pressed: {
-    opacity: 0.82,
+    opacity: 0.9,
+    transform: [{ translateY: 1 }],
   },
   disabled: {
     opacity: 0.55,

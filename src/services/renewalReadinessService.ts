@@ -309,7 +309,7 @@ export async function getRenewalReadiness(
       code: 'NO_FIREARMS',
       title: 'No firearms recorded',
       detail:
-        'Add at least one firearm before a licence renewal can be prepared.',
+        'Add at least one firearm before a licence application can be prepared.',
       severity: 'critical',
     });
   }

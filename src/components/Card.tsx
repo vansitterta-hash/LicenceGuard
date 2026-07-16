@@ -32,6 +32,8 @@ export default function Card({
 
   return (
     <View style={[styles.card, paddingStyles[padding], style]}>
+      <View pointerEvents="none" style={styles.topHighlight} />
+
       {hasHeader ? (
         <View style={styles.header}>
           <View style={styles.headerText}>
@@ -76,6 +78,25 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     borderRadius: Radius.xl,
     borderWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 2,
+  },
+  topHighlight: {
+    backgroundColor: Colors.gunmetalLight,
+    height: 1,
+    left: 18,
+    opacity: 0.48,
+    position: 'absolute',
+    right: 18,
+    top: 0,
   },
   header: {
     alignItems: 'flex-start',
@@ -90,7 +111,7 @@ const styles = StyleSheet.create({
   },
   title: {
     ...Typography.cardTitle,
-    color: Colors.white,
+    color: Colors.silverLight,
   },
   subtitle: {
     ...Typography.caption,
