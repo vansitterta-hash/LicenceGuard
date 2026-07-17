@@ -12,6 +12,7 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   FileCheck2,
+  FolderOpen,
   ShieldCheck,
   Target,
 } from 'lucide-react-native';
@@ -26,6 +27,7 @@ import CompetencyFormScreen from '../screens/CompetencyFormScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import FirearmFormScreen from '../screens/FirearmFormScreen';
 import FirearmsScreen from '../screens/FirearmsScreen';
+import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
@@ -164,6 +166,35 @@ export default function AppNavigator() {
                 <Pressable
                   onPress={() =>
                     navigation.navigate(
+                      'DocumentLibrary',
+                      {
+                        clientId:
+                          route.params.clientId,
+                      }
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    pressed
+                      ? styles.headerActionPressed
+                      : null,
+                  ]}
+                >
+                  <FolderOpen
+                    color={Colors.primary}
+                    size={17}
+                  />
+
+                  <Text
+                    style={styles.headerActionText}
+                  >
+                    Documents
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate(
                       'ApplicationCases',
                       {
                         clientId:
@@ -228,6 +259,14 @@ export default function AppNavigator() {
               ? 'Edit firearm'
               : 'Add firearm',
           })}
+        />
+
+        <Stack.Screen
+          component={DocumentLibraryScreen}
+          name="DocumentLibrary"
+          options={{
+            title: 'Document library',
+          }}
         />
 
         <Stack.Screen
