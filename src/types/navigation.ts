@@ -42,4 +42,12 @@ export type RootStackParamList = {
     clientId: string;
     applicationCaseId?: string;
   };
+
+  DocumentLibrary: {
+    clientId: string;
+  };
+
+  DocumentTemplates: {
+    clientId: string;
+  };
 };

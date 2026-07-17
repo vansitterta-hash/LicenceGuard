@@ -9,6 +9,7 @@
     "@react-navigation/native-stack": "^7.17.10",
     "@supabase/supabase-js": "^2.110.2",
     "expo": "~57.0.4",
+    "expo-document-picker": "~57.0.1",
     "expo-linking": "~57.0.2",
     "expo-status-bar": "~57.0.0",
     "lucide-react-native": "^1.24.0",
@@ -29,7 +30,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "tsc": "tsc --noEmit"
+    "tsc": "node --stack_size=16384 ./node_modules/typescript/lib/tsc.js --noEmit"
   },
   "private": true
 }
