@@ -13,11 +13,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   FileCheck2,
   FolderOpen,
+  Gauge,
   ShieldCheck,
   Target,
 } from 'lucide-react-native';
 
 import ApplicationCaseFormScreen from '../screens/ApplicationCaseFormScreen';
+import ApplicationReadinessScreen from '../screens/ApplicationReadinessScreen';
 import ApplicationCasesScreen from '../screens/ApplicationCasesScreen';
 import ClientFormScreen from '../screens/ClientFormScreen';
 import ClientProfileScreen from '../screens/ClientProfileScreen';
@@ -195,6 +197,35 @@ export default function AppNavigator() {
                 <Pressable
                   onPress={() =>
                     navigation.navigate(
+                      'ApplicationReadiness',
+                      {
+                        clientId:
+                          route.params.clientId,
+                      }
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    pressed
+                      ? styles.headerActionPressed
+                      : null,
+                  ]}
+                >
+                  <Gauge
+                    color={Colors.primary}
+                    size={17}
+                  />
+
+                  <Text
+                    style={styles.headerActionText}
+                  >
+                    Readiness
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate(
                       'ApplicationCases',
                       {
                         clientId:
@@ -266,6 +297,14 @@ export default function AppNavigator() {
           name="DocumentLibrary"
           options={{
             title: 'Document library',
+          }}
+        />
+
+        <Stack.Screen
+          component={ApplicationReadinessScreen}
+          name="ApplicationReadiness"
+          options={{
+            title: 'Application readiness',
           }}
         />
 
