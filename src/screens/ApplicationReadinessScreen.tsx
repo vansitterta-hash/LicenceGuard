@@ -14,6 +14,7 @@ import {
   ChevronRight,
   CircleAlert,
   FileCheck2,
+  FileOutput,
   FolderOpen,
   ShieldCheck,
 } from 'lucide-react-native';
@@ -284,6 +285,13 @@ export default function ApplicationReadinessScreen({
                     applicationCase.caseId,
                 })
               }
+              onGenerate={() =>
+                navigation.navigate('ApplicationPackGenerator', {
+                  clientId: data.clientId,
+                  applicationCaseId:
+                    applicationCase.caseId,
+                })
+              }
               onToggle={() =>
                 setExpandedCaseId((current) =>
                   current === applicationCase.caseId
@@ -304,11 +312,13 @@ function CaseReadinessCard({
   expanded,
   onToggle,
   onEdit,
+  onGenerate,
 }: {
   applicationCase: ApplicationCaseReadiness;
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  onGenerate: () => void;
 }) {
   const visual = getStateVisual(applicationCase.state);
 
@@ -398,11 +408,27 @@ function CaseReadinessCard({
               </Text>
             </View>
 
-            <Button
-              onPress={onEdit}
-              title="Edit case"
-              variant="secondary"
-            />
+            <View style={styles.requirementActions}>
+              <Button
+                leftIcon={
+                  <FileOutput
+                    color={Colors.white}
+                    size={18}
+                  />
+                }
+                onPress={onGenerate}
+                title={
+                  applicationCase.readyToGenerate
+                    ? 'Generate pack'
+                    : 'Review draft pack'
+                }
+              />
+              <Button
+                onPress={onEdit}
+                title="Edit case"
+                variant="secondary"
+              />
+            </View>
           </View>
 
           <View style={styles.requirementList}>
@@ -643,6 +669,7 @@ const styles = StyleSheet.create({
   caseScore: { ...Typography.cardTitle, color: Colors.white, minWidth: 48, textAlign: 'right' },
   chevronExpanded: { transform: [{ rotate: '90deg' }] },
   requirementSection: { borderTopWidth: 1, borderTopColor: Colors.border, padding: Spacing.lg, backgroundColor: Colors.surfaceRaised },
+  requirementActions: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   requirementHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.lg, marginBottom: Spacing.lg, flexWrap: 'wrap' },
   requirementTitle: { ...Typography.cardTitle, color: Colors.white },
   requirementSubtitle: { ...Typography.caption, color: Colors.textMuted, marginTop: 2 },

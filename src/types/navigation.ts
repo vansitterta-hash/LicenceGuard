@@ -38,6 +38,11 @@ export type RootStackParamList = {
     clientId: string;
   };
 
+  ApplicationPackGenerator: {
+    clientId: string;
+    applicationCaseId: string;
+  };
+
   ApplicationCases: {
     clientId: string;
   };

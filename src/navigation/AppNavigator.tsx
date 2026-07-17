@@ -20,6 +20,7 @@ import {
 
 import ApplicationCaseFormScreen from '../screens/ApplicationCaseFormScreen';
 import ApplicationReadinessScreen from '../screens/ApplicationReadinessScreen';
+import ApplicationPackGeneratorScreen from '../screens/ApplicationPackGeneratorScreen';
 import ApplicationCasesScreen from '../screens/ApplicationCasesScreen';
 import ClientFormScreen from '../screens/ClientFormScreen';
 import ClientProfileScreen from '../screens/ClientProfileScreen';
@@ -305,6 +306,14 @@ export default function AppNavigator() {
           name="ApplicationReadiness"
           options={{
             title: 'Application readiness',
+          }}
+        />
+
+        <Stack.Screen
+          component={ApplicationPackGeneratorScreen}
+          name="ApplicationPackGenerator"
+          options={{
+            title: 'Application pack generator',
           }}
         />
 
