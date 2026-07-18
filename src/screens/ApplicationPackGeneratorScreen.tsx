@@ -15,42 +15,35 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  BookOpen,
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
   Edit3,
-  FileCheck2,
-  FileText,
+  FileOutput,
   FolderOpen,
+  Printer,
   RefreshCw,
-  ShieldCheck,
-  Target,
   TriangleAlert,
   Upload,
-  UserRound,
 } from 'lucide-react-native';
 
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Screen from '../components/Screen';
-import { getApplicationCase } from '../services/applicationCaseService';
-import { getClientApplicationReadiness } from '../services/applicationReadinessService';
-import { getClient } from '../services/clientService';
-import { listClientFirearms } from '../services/firearmService';
+import { useAuth } from '../context/AuthContext';
+import {
+  buildApplicationPackManifest,
+  prepareApplicationPack,
+  printApplicationPackManifest,
+} from '../services/applicationPackService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
-import {
-  getApplicationCaseStatusLabel,
-  getApplicationCaseTypeLabel,
-  isCompetencyApplicationType,
-  type ApplicationCaseListItem,
-} from '../types/applicationCase';
-import type { ClientRecord } from '../types/client';
-import type { DocumentType } from '../types/document';
-import type { FirearmListItem } from '../types/firearm';
+import type {
+  ApplicationPackItem,
+  ApplicationPackManifest,
+} from '../types/applicationPack';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<
@@ -58,96 +51,33 @@ type Props = NativeStackScreenProps<
   'ApplicationPackGenerator'
 >;
 
-type RequirementItem = {
-  key: string;
-  label: string;
-  detail: string;
-  required: boolean;
-  state:
-    | 'PRESENT'
-    | 'MISSING'
-    | 'EXPIRED'
-    | 'UNVERIFIED'
-    | 'NOT_APPLICABLE';
-  documentType: DocumentType | null;
-};
-
-type CaseReadiness = {
-  caseId: string;
-  state:
-    | 'READY'
-    | 'ACTION_REQUIRED'
-    | 'BLOCKED'
-    | 'NOT_STARTED';
-  readinessPercent: number;
-  requirements: RequirementItem[];
-};
-
-type WorkspaceData = {
-  client: ClientRecord;
-  applicationCase: ApplicationCaseListItem;
-  firearm: FirearmListItem | null;
-  readiness: CaseReadiness | null;
-};
-
 export default function ApplicationPackGeneratorScreen({
   navigation,
   route,
 }: Props) {
+  const { dealerProfile, user } = useAuth();
   const { width } = useWindowDimensions();
-  const [data, setData] = useState<WorkspaceData | null>(
-    null
-  );
+  const [manifest, setManifest] =
+    useState<ApplicationPackManifest | null>(null);
   const [loading, setLoading] = useState(true);
+  const [preparing, setPreparing] = useState(false);
 
-  const isCompact = width < 820;
+  const compact = width < 820;
 
-  const loadData = useCallback(async () => {
+  const loadManifest = useCallback(async () => {
     setLoading(true);
 
     try {
-      const [
-        client,
-        applicationCase,
-        firearms,
-        readinessResult,
-      ] = await Promise.all([
-        getClient(route.params.clientId),
-        getApplicationCase(
+      const result =
+        await buildApplicationPackManifest(
+          route.params.clientId,
           route.params.applicationCaseId
-        ),
-        listClientFirearms(route.params.clientId),
-        getClientApplicationReadiness(
-          route.params.clientId
-        ),
-      ]);
+        );
 
-      const readiness =
-        (
-          readinessResult as unknown as {
-            cases?: CaseReadiness[];
-          }
-        ).cases?.find(
-          (item) =>
-            item.caseId ===
-            route.params.applicationCaseId
-        ) ?? null;
-
-      const firearm =
-        firearms.find(
-          (item) =>
-            item.id === applicationCase.firearm_id
-        ) ?? null;
-
-      setData({
-        client,
-        applicationCase,
-        firearm,
-        readiness,
-      });
+      setManifest(result);
     } catch (error) {
       Alert.alert(
-        'Unable to load application workspace',
+        'Unable to build application pack',
         error instanceof Error
           ? error.message
           : 'An unknown error occurred.'
@@ -161,101 +91,125 @@ export default function ApplicationPackGeneratorScreen({
   ]);
 
   useEffect(() => {
-    void loadData();
+    void loadManifest();
 
     const unsubscribe = navigation.addListener(
       'focus',
       () => {
-        void loadData();
+        void loadManifest();
       }
     );
 
     return unsubscribe;
-  }, [loadData, navigation]);
+  }, [loadManifest, navigation]);
 
-  const counts = useMemo(() => {
-    const requirements =
-      data?.readiness?.requirements ?? [];
-
-    return {
-      total: requirements.length,
-      complete: requirements.filter(
-        (item) => item.state === 'PRESENT'
-      ).length,
-      missing: requirements.filter(
+  const firstBlockingItem = useMemo(
+    () =>
+      manifest?.items.find(
         (item) =>
-          item.state === 'MISSING' ||
-          item.state === 'EXPIRED'
-      ).length,
-      unverified: requirements.filter(
-        (item) => item.state === 'UNVERIFIED'
-      ).length,
-    };
-  }, [data?.readiness?.requirements]);
+          item.required &&
+          item.documentType &&
+          item.state !== 'COMPLETE'
+      ) ?? null,
+    [manifest]
+  );
 
-  if (loading || !data) {
+  const prepare = async () => {
+    if (
+      !manifest ||
+      !dealerProfile?.dealerId ||
+      !user?.id
+    ) {
+      return;
+    }
+
+    setPreparing(true);
+
+    try {
+      const result = await prepareApplicationPack(
+        dealerProfile.dealerId,
+        user.id,
+        route.params.clientId,
+        route.params.applicationCaseId
+      );
+
+      setManifest(result.manifest);
+
+      Alert.alert(
+        result.manifest.packState === 'READY'
+          ? 'Application pack ready'
+          : 'Pack preparation started',
+        result.manifest.packState === 'READY'
+          ? 'All blocking requirements are complete. The case has been marked Ready for Submission.'
+          : 'The case has been marked Pack in Preparation. Resolve the outstanding items shown in the manifest.'
+      );
+    } catch (error) {
+      Alert.alert(
+        'Unable to prepare application pack',
+        error instanceof Error
+          ? error.message
+          : 'An unknown error occurred.'
+      );
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const printManifest = () => {
+    if (!manifest) {
+      return;
+    }
+
+    try {
+      printApplicationPackManifest(manifest);
+    } catch (error) {
+      Alert.alert(
+        'Unable to print manifest',
+        error instanceof Error
+          ? error.message
+          : 'An unknown error occurred.'
+      );
+    }
+  };
+
+  if (loading || !manifest) {
     return (
       <Screen scroll={false}>
-        <View style={styles.loadingState}>
+        <View style={styles.loading}>
           <ActivityIndicator
             color={Colors.primary}
             size="large"
           />
-
           <Text style={styles.loadingText}>
-            Building application workspace...
+            Building ordered application pack...
           </Text>
         </View>
       </Screen>
     );
   }
 
-  const visual = getReadinessVisual(
-    data.readiness?.state ?? 'NOT_STARTED'
+  const visual = getPackVisual(
+    manifest.packState
   );
-
-  const competencyApplication =
-    isCompetencyApplicationType(
-      data.applicationCase.application_type
-    );
-
-  const subjectTitle = competencyApplication
-    ? data.applicationCase.subjectDescription
-    : data.firearm
-      ? [data.firearm.make, data.firearm.model]
-          .filter(Boolean)
-          .join(' ')
-      : data.applicationCase.subjectDescription;
-
-  const secondarySubject = competencyApplication
-    ? 'Competency application'
-    : data.firearm
-      ? `${data.firearm.calibre} • ${data.firearm.serial_number}`
-      : 'Firearm details unavailable';
 
   return (
     <Screen maxWidth={1180}>
       <View
         style={[
           styles.header,
-          isCompact ? styles.headerCompact : null,
+          compact ? styles.headerCompact : null,
         ]}
       >
         <View style={styles.headerContent}>
           <Text style={styles.eyebrow}>
-            APPLICATION PACK WORKSPACE
+            APPLICATION PACK ENGINE
           </Text>
-
           <Text style={styles.title}>
-            {subjectTitle}
+            {manifest.subject}
           </Text>
-
           <Text style={styles.subtitle}>
-            {data.client.first_name}{' '}
-            {data.client.surname} •{' '}
-            {getApplicationCaseTypeLabel(
-              data.applicationCase.application_type
-            )}
+            {manifest.clientName} •{' '}
+            {manifest.applicationTypeLabel}
           </Text>
         </View>
 
@@ -267,11 +221,10 @@ export default function ApplicationPackGeneratorScreen({
                 size={18}
               />
             }
-            onPress={() => void loadData()}
-            title="Refresh"
+            onPress={() => void loadManifest()}
+            title="Rebuild"
             variant="secondary"
           />
-
           <Button
             leftIcon={
               <Edit3
@@ -283,9 +236,11 @@ export default function ApplicationPackGeneratorScreen({
               navigation.navigate(
                 'ApplicationCaseForm',
                 {
-                  clientId: data.client.id,
+                  clientId:
+                    route.params.clientId,
                   applicationCaseId:
-                    data.applicationCase.id,
+                    route.params
+                      .applicationCaseId,
                 }
               )
             }
@@ -297,21 +252,21 @@ export default function ApplicationPackGeneratorScreen({
       <Card
         padding="large"
         style={[
-          styles.heroCard,
-          {
-            borderColor: visual.borderColor,
-          },
+          styles.decisionCard,
+          { borderColor: visual.color },
         ]}
       >
         <View
           style={[
-            styles.heroRow,
-            isCompact ? styles.heroRowCompact : null,
+            styles.decisionRow,
+            compact
+              ? styles.decisionRowCompact
+              : null,
           ]}
         >
           <View
             style={[
-              styles.heroIcon,
+              styles.decisionIcon,
               {
                 backgroundColor:
                   visual.backgroundColor,
@@ -324,420 +279,252 @@ export default function ApplicationPackGeneratorScreen({
             />
           </View>
 
-          <View style={styles.heroContent}>
+          <View style={styles.decisionContent}>
             <Text
               style={[
-                styles.heroState,
+                styles.decisionState,
                 { color: visual.color },
               ]}
             >
               {visual.label}
             </Text>
-
-            <Text style={styles.heroTitle}>
-              {data.readiness
-                ? `${data.readiness.readinessPercent}% pack readiness`
-                : 'Readiness has not been calculated'}
+            <Text style={styles.decisionTitle}>
+              {manifest.readinessScore}% ready
             </Text>
-
-            <Text style={styles.heroText}>
+            <Text style={styles.decisionText}>
               {visual.description}
             </Text>
           </View>
 
-          <View style={styles.statusColumn}>
-            <Text style={styles.statusLabel}>
-              CASE STATUS
-            </Text>
-
-            <Text style={styles.statusValue}>
-              {getApplicationCaseStatusLabel(
-                data.applicationCase.status
-              )}
-            </Text>
-
-            <Text style={styles.statusProgress}>
-              {data.applicationCase.progress_percent}%
-              workflow progress
-            </Text>
+          <View style={styles.engineActions}>
+            <Button
+              leftIcon={
+                <FileOutput
+                  color={Colors.white}
+                  size={18}
+                />
+              }
+              loading={preparing}
+              onPress={() => void prepare()}
+              title={
+                manifest.packState === 'READY'
+                  ? 'Finalise pack'
+                  : 'Start pack preparation'
+              }
+            />
+            <Button
+              leftIcon={
+                <ClipboardCheck
+                  color={Colors.white}
+                  size={18}
+                />
+              }
+              onPress={() =>
+                navigation.navigate(
+                  'ApplicationAutofill',
+                  {
+                    clientId:
+                      route.params.clientId,
+                    applicationCaseId:
+                      route.params
+                        .applicationCaseId,
+                  }
+                )
+              }
+              title="AutoFill SAPS forms"
+            />
+            <Button
+              leftIcon={
+                <Printer
+                  color={Colors.silver}
+                  size={18}
+                />
+              }
+              onPress={printManifest}
+              title="Print manifest"
+              variant="secondary"
+            />
           </View>
         </View>
       </Card>
 
-      <View style={styles.summaryGrid}>
-        <MetricCard
-          icon={ClipboardCheck}
+      <View style={styles.metrics}>
+        <Metric
           label="Pack items"
-          value={counts.total}
+          value={manifest.totalItems}
         />
-
-        <MetricCard
-          icon={CheckCircle2}
+        <Metric
           label="Complete"
-          value={counts.complete}
+          value={manifest.completeItems}
         />
-
-        <MetricCard
-          icon={TriangleAlert}
-          label="Missing or expired"
-          value={counts.missing}
+        <Metric
+          label="Missing / expired"
+          value={manifest.missingItems}
         />
-
-        <MetricCard
-          icon={CircleAlert}
-          label="Awaiting verification"
-          value={counts.unverified}
+        <Metric
+          label="Verification warnings"
+          value={manifest.warningItems}
         />
       </View>
 
-      <View
-        style={[
-          styles.workspaceGrid,
-          isCompact
-            ? styles.workspaceGridCompact
-            : null,
-        ]}
-      >
-        <View style={styles.mainColumn}>
-          <Card
-            subtitle="Everything connected to this application in one place."
-            title="Application overview"
-          >
-            <View style={styles.detailGrid}>
-              <Detail
-                icon={UserRound}
-                label="Applicant"
-                value={`${data.client.first_name} ${data.client.surname}`}
-              />
-
-              <Detail
-                icon={FileText}
-                label="Application"
-                value={getApplicationCaseTypeLabel(
-                  data.applicationCase
-                    .application_type
-                )}
-              />
-
-              <Detail
-                icon={
-                  competencyApplication
-                    ? ShieldCheck
-                    : Target
-                }
-                label={
-                  competencyApplication
-                    ? 'Competency'
-                    : 'Firearm'
-                }
-                value={secondarySubject}
-              />
-
-              <Detail
-                icon={ClipboardCheck}
-                label="Licence section"
-                value={
-                  data.applicationCase
-                    .licence_section
-                    ? `Section ${data.applicationCase.licence_section}`
-                    : 'Not applicable'
-                }
-              />
-
-              <Detail
-                icon={FileCheck2}
-                label="Acquisition source"
-                value={formatSource(
-                  data.applicationCase
-                    .acquisition_source
-                )}
-              />
-
-              <Detail
-                icon={UserRound}
-                label="Supplier"
-                value={
-                  data.applicationCase
-                    .supplier_name ??
-                  'Not applicable'
-                }
-              />
-            </View>
-
-            {data.applicationCase
-              .motivation_summary ? (
-              <View style={styles.notesBlock}>
-                <Text style={styles.notesLabel}>
-                  Motivation purpose
-                </Text>
-
-                <Text style={styles.notesText}>
-                  {
-                    data.applicationCase
-                      .motivation_summary
-                  }
-                </Text>
-              </View>
-            ) : null}
-          </Card>
-
-          <Card
-            subtitle="Required and recommended items are assembled in submission order."
-            title="Pack checklist"
-          >
-            {!data.readiness ? (
-              <View style={styles.emptyState}>
-                <CircleAlert
-                  color={Colors.warning}
-                  size={36}
-                />
-
-                <Text style={styles.emptyTitle}>
-                  No readiness result
-                </Text>
-
-                <Text style={styles.emptyText}>
-                  Open the readiness engine to calculate
-                  this application’s document
-                  requirements.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.checklist}>
-                {data.readiness.requirements.map(
-                  (requirement, index) => (
-                    <RequirementRow
-                      index={index + 1}
-                      key={requirement.key}
-                      onPress={() => {
-                        if (
-                          requirement.documentType
-                        ) {
-                          navigation.navigate(
-                            'DocumentLibrary',
-                            {
-                              clientId:
-                                data.client.id,
-                              applicationCaseId:
-                                data.applicationCase.id,
-                              documentType:
-                                requirement.documentType,
-                              openUpload:
-                                requirement.state !==
-                                'PRESENT',
-                            }
-                          );
-                        }
-                      }}
-                      requirement={requirement}
-                    />
-                  )
-                )}
-              </View>
-            )}
-          </Card>
-        </View>
-
-        <View style={styles.sideColumn}>
-          <Card
-            subtitle="Move through the complete application workflow."
-            title="Workspace actions"
-          >
-            <View style={styles.actionStack}>
-              <WorkspaceAction
-                description="Review every requirement and its current state."
-                icon={ClipboardCheck}
-                label="Open readiness"
-                onPress={() =>
-                  navigation.navigate(
-                    'ApplicationReadiness',
-                    {
-                      clientId: data.client.id,
-                    }
-                  )
-                }
-              />
-
-              <WorkspaceAction
-                description="Upload and manage applicant and case documents."
-                icon={FolderOpen}
-                label="Document library"
-                onPress={() =>
-                  navigation.navigate(
-                    'DocumentLibrary',
-                    {
-                      clientId: data.client.id,
-                      applicationCaseId:
-                        data.applicationCase.id,
-                    }
-                  )
-                }
-              />
-
-              <WorkspaceAction
-                description="Find motivations, research and supporting material."
-                icon={BookOpen}
-                label="Reference library"
-                onPress={() =>
-                  navigation.navigate(
-                    'ReferenceLibrary'
-                  )
-                }
-              />
-
-              <WorkspaceAction
-                description="Update application details, status and submission tracking."
-                icon={Edit3}
-                label="Edit application"
-                onPress={() =>
-                  navigation.navigate(
-                    'ApplicationCaseForm',
-                    {
-                      clientId: data.client.id,
-                      applicationCaseId:
-                        data.applicationCase.id,
-                    }
-                  )
-                }
-              />
-            </View>
-          </Card>
-
-          <Card
-            subtitle="LicenceGuard will only mark the pack ready when all blocking items are complete."
-            title="Pack decision"
-          >
-            <View
-              style={[
-                styles.decisionBox,
-                {
-                  borderColor:
-                    visual.borderColor,
-                  backgroundColor:
-                    visual.backgroundColor,
-                },
-              ]}
-            >
-              <visual.Icon
-                color={visual.color}
-                size={28}
-              />
-
-              <Text
-                style={[
-                  styles.decisionTitle,
-                  { color: visual.color },
-                ]}
-              >
-                {visual.label}
-              </Text>
-
-              <Text style={styles.decisionText}>
-                {visual.description}
-              </Text>
-            </View>
-
-            {counts.missing > 0 ? (
-              <Button
-                leftIcon={
-                  <Upload
-                    color={Colors.white}
+      {manifest.blockingReasons.length > 0 ? (
+        <Card
+          subtitle="These items prevent the application from being submission-ready."
+          title="Blocking reasons"
+        >
+          <View style={styles.blockerList}>
+            {manifest.blockingReasons.map(
+              (reason) => (
+                <View
+                  key={reason}
+                  style={styles.blocker}
+                >
+                  <TriangleAlert
+                    color={Colors.danger}
                     size={18}
                   />
-                }
-                onPress={() => {
-                  const firstMissing =
-                    data.readiness?.requirements.find(
-                      (item) =>
-                        (item.state ===
-                          'MISSING' ||
-                          item.state ===
-                            'EXPIRED') &&
-                        item.documentType
-                    );
+                  <Text style={styles.blockerText}>
+                    {reason}
+                  </Text>
+                </View>
+              )
+            )}
+          </View>
 
-                  navigation.navigate(
-                    'DocumentLibrary',
-                    {
-                      clientId: data.client.id,
-                      applicationCaseId:
-                        data.applicationCase.id,
-                      documentType:
-                        firstMissing?.documentType ??
-                        undefined,
-                      openUpload: true,
-                    }
-                  );
-                }}
-                style={styles.decisionButton}
-                title="Add missing document"
-              />
-            ) : null}
-          </Card>
+          {firstBlockingItem ? (
+            <Button
+              leftIcon={
+                <Upload
+                  color={Colors.white}
+                  size={18}
+                />
+              }
+              onPress={() =>
+                navigation.navigate(
+                  'DocumentLibrary',
+                  {
+                    clientId:
+                      route.params.clientId,
+                    applicationCaseId:
+                      route.params
+                        .applicationCaseId,
+                    documentType:
+                      firstBlockingItem.documentType ??
+                      undefined,
+                    openUpload: true,
+                  }
+                )
+              }
+              style={styles.blockerButton}
+              title="Resolve first blocking item"
+            />
+          ) : null}
+        </Card>
+      ) : null}
+
+      <Card
+        subtitle="Documents are arranged in the exact order recorded by the readiness engine."
+        title="Submission manifest"
+      >
+        <View style={styles.itemList}>
+          {manifest.items.map((item) => (
+            <PackItemRow
+              item={item}
+              key={item.key}
+              onPress={() => {
+                if (!item.documentType) {
+                  return;
+                }
+
+                navigation.navigate(
+                  'DocumentLibrary',
+                  {
+                    clientId:
+                      route.params.clientId,
+                    applicationCaseId:
+                      route.params
+                        .applicationCaseId,
+                    documentType:
+                      item.documentType,
+                    openUpload:
+                      item.state !== 'COMPLETE',
+                  }
+                );
+              }}
+            />
+          ))}
         </View>
-      </View>
+      </Card>
     </Screen>
   );
 }
 
-function RequirementRow({
-  index,
+function PackItemRow({
+  item,
   onPress,
-  requirement,
 }: {
-  index: number;
+  item: ApplicationPackItem;
   onPress: () => void;
-  requirement: RequirementItem;
 }) {
-  const visual = getRequirementVisual(
-    requirement.state
-  );
+  const visual = getItemVisual(item.state);
 
   return (
     <Pressable
-      disabled={!requirement.documentType}
+      disabled={!item.documentType}
       onPress={onPress}
       style={({ pressed }) => [
-        styles.requirementRow,
-        pressed
-          ? styles.requirementRowPressed
-          : null,
+        styles.itemRow,
+        pressed ? styles.pressed : null,
       ]}
     >
-      <View style={styles.requirementOrder}>
-        <Text style={styles.requirementOrderText}>
-          {index}
+      <View style={styles.order}>
+        <Text style={styles.orderText}>
+          {item.order}
         </Text>
       </View>
 
-      <View style={styles.requirementContent}>
-        <View style={styles.requirementTitleRow}>
-          <Text style={styles.requirementTitle}>
-            {requirement.label}
+      <View style={styles.itemContent}>
+        <View style={styles.itemTitleRow}>
+          <Text style={styles.itemTitle}>
+            {item.label}
           </Text>
-
           <Text
             style={[
               styles.requirementType,
-              requirement.required
-                ? styles.requiredText
+              item.required
+                ? styles.required
                 : null,
             ]}
           >
-            {requirement.required
+            {item.required
               ? 'Required'
               : 'Recommended'}
           </Text>
         </View>
 
-        <Text style={styles.requirementDetail}>
-          {requirement.detail}
+        <Text style={styles.itemDetail}>
+          {item.detail}
         </Text>
+
+        {item.document ? (
+          <View style={styles.documentLine}>
+            <FolderOpen
+              color={Colors.silverDark}
+              size={14}
+            />
+            <Text style={styles.documentName}>
+              {item.document.document_name}
+              {item.document.is_verified
+                ? ' • Verified'
+                : ' • Not verified'}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View
         style={[
-          styles.requirementState,
+          styles.itemState,
           {
             borderColor: visual.color,
             backgroundColor:
@@ -749,10 +536,9 @@ function RequirementRow({
           color={visual.color}
           size={16}
         />
-
         <Text
           style={[
-            styles.requirementStateText,
+            styles.itemStateText,
             { color: visual.color },
           ]}
         >
@@ -763,67 +549,18 @@ function RequirementRow({
   );
 }
 
-function WorkspaceAction({
-  description,
-  icon: Icon,
-  label,
-  onPress,
-}: {
-  description: string;
-  icon: typeof FileText;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.workspaceAction,
-        pressed
-          ? styles.workspaceActionPressed
-          : null,
-      ]}
-    >
-      <View style={styles.workspaceActionIcon}>
-        <Icon
-          color={Colors.primary}
-          size={21}
-        />
-      </View>
-
-      <View style={styles.workspaceActionContent}>
-        <Text style={styles.workspaceActionTitle}>
-          {label}
-        </Text>
-
-        <Text style={styles.workspaceActionText}>
-          {description}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function MetricCard({
-  icon: Icon,
+function Metric({
   label,
   value,
 }: {
-  icon: typeof FileText;
   label: string;
   value: number;
 }) {
   return (
     <Card style={styles.metricCard}>
-      <Icon
-        color={Colors.primary}
-        size={22}
-      />
-
       <Text style={styles.metricValue}>
         {value}
       </Text>
-
       <Text style={styles.metricLabel}>
         {label}
       </Text>
@@ -831,163 +568,81 @@ function MetricCard({
   );
 }
 
-function Detail({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof FileText;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.detail}>
-      <Icon
-        color={Colors.primary}
-        size={19}
-      />
-
-      <View style={styles.detailContent}>
-        <Text style={styles.detailLabel}>
-          {label}
-        </Text>
-
-        <Text style={styles.detailValue}>
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-function getReadinessVisual(
-  state:
-    | 'READY'
-    | 'ACTION_REQUIRED'
-    | 'BLOCKED'
-    | 'NOT_STARTED'
+function getPackVisual(
+  state: ApplicationPackManifest['packState']
 ) {
-  switch (state) {
-    case 'READY':
-      return {
-        label: 'Pack ready',
-        description:
-          'All blocking requirements are complete. The application pack can proceed to final review and submission preparation.',
-        color: Colors.success,
-        borderColor: Colors.success,
-        backgroundColor:
-          'rgba(40, 199, 111, 0.10)',
-        Icon: CheckCircle2,
-      };
-
-    case 'ACTION_REQUIRED':
-      return {
-        label: 'Verification required',
-        description:
-          'The documents are present, but one or more items still require verification before the pack is submission-ready.',
-        color: Colors.warning,
-        borderColor: Colors.warning,
-        backgroundColor:
-          'rgba(255, 193, 7, 0.10)',
-        Icon: CircleAlert,
-      };
-
-    case 'BLOCKED':
-      return {
-        label: 'Pack blocked',
-        description:
-          'One or more required documents are missing or expired. Resolve the blocking items before generating the final pack.',
-        color: Colors.danger,
-        borderColor: Colors.danger,
-        backgroundColor:
-          'rgba(229, 57, 53, 0.10)',
-        Icon: TriangleAlert,
-      };
-
-    default:
-      return {
-        label: 'Not yet assessed',
-        description:
-          'Run the readiness engine to determine the complete application pack requirements.',
-        color: Colors.silver,
-        borderColor: Colors.borderStrong,
-        backgroundColor: Colors.surfaceSoft,
-        Icon: ClipboardCheck,
-      };
+  if (state === 'READY') {
+    return {
+      label: 'Pack ready',
+      description:
+        'All blocking requirements are complete. Finalising the pack marks the application Ready for Submission.',
+      color: Colors.success,
+      backgroundColor:
+        'rgba(40, 199, 111, 0.10)',
+      Icon: CheckCircle2,
+    };
   }
+
+  if (state === 'ACTION_REQUIRED') {
+    return {
+      label: 'Verification required',
+      description:
+        'All required documents are present, but verification must be completed before final submission.',
+      color: Colors.warning,
+      backgroundColor:
+        'rgba(255, 193, 7, 0.10)',
+      Icon: CircleAlert,
+    };
+  }
+
+  return {
+    label: 'Pack blocked',
+    description:
+      'Required documents are missing or expired. Start preparation and resolve each blocking item.',
+    color: Colors.danger,
+    backgroundColor:
+      'rgba(229, 57, 53, 0.10)',
+    Icon: TriangleAlert,
+  };
 }
 
-function getRequirementVisual(
-  state: RequirementItem['state']
+function getItemVisual(
+  state: ApplicationPackItem['state']
 ) {
-  switch (state) {
-    case 'PRESENT':
-      return {
-        label: 'Complete',
-        color: Colors.success,
-        backgroundColor:
-          'rgba(40, 199, 111, 0.10)',
-        Icon: CheckCircle2,
-      };
-
-    case 'UNVERIFIED':
-      return {
-        label: 'Verify',
-        color: Colors.warning,
-        backgroundColor:
-          'rgba(255, 193, 7, 0.10)',
-        Icon: CircleAlert,
-      };
-
-    case 'EXPIRED':
-      return {
-        label: 'Expired',
-        color: Colors.danger,
-        backgroundColor:
-          'rgba(229, 57, 53, 0.10)',
-        Icon: TriangleAlert,
-      };
-
-    case 'NOT_APPLICABLE':
-      return {
-        label: 'N/A',
-        color: Colors.silverDark,
-        backgroundColor: Colors.surfaceSoft,
-        Icon: FileText,
-      };
-
-    default:
-      return {
-        label: 'Missing',
-        color: Colors.danger,
-        backgroundColor:
-          'rgba(229, 57, 53, 0.10)',
-        Icon: TriangleAlert,
-      };
+  if (state === 'COMPLETE') {
+    return {
+      label: 'Complete',
+      color: Colors.success,
+      backgroundColor:
+        'rgba(40, 199, 111, 0.10)',
+      Icon: CheckCircle2,
+    };
   }
-}
 
-function formatSource(
-  value:
-    | 'DEALER'
-    | 'PRIVATE_SELLER'
-    | 'EXISTING_FIREARM'
-    | 'NOT_APPLICABLE'
-): string {
-  switch (value) {
-    case 'DEALER':
-      return 'Dealer purchase';
-    case 'PRIVATE_SELLER':
-      return 'Private sale';
-    case 'EXISTING_FIREARM':
-      return 'Existing firearm';
-    default:
-      return 'Not applicable';
+  if (state === 'UNVERIFIED') {
+    return {
+      label: 'Verify',
+      color: Colors.warning,
+      backgroundColor:
+        'rgba(255, 193, 7, 0.10)',
+      Icon: CircleAlert,
+    };
   }
+
+  return {
+    label:
+      state === 'EXPIRED'
+        ? 'Expired'
+        : 'Missing',
+    color: Colors.danger,
+    backgroundColor:
+      'rgba(229, 57, 53, 0.10)',
+    Icon: TriangleAlert,
+  };
 }
 
 const styles = StyleSheet.create({
-  loadingState: {
+  loading: {
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
@@ -1031,65 +686,47 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.md,
   },
-  heroCard: {
+  decisionCard: {
     borderWidth: 1,
     marginBottom: Spacing.lg,
   },
-  heroRow: {
+  decisionRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: Spacing.lg,
   },
-  heroRowCompact: {
+  decisionRowCompact: {
     alignItems: 'stretch',
     flexDirection: 'column',
   },
-  heroIcon: {
+  decisionIcon: {
     alignItems: 'center',
     borderRadius: Radius.lg,
     height: 68,
     justifyContent: 'center',
     width: 68,
   },
-  heroContent: {
+  decisionContent: {
     flex: 1,
   },
-  heroState: {
+  decisionState: {
     ...Typography.eyebrow,
   },
-  heroTitle: {
+  decisionTitle: {
     ...Typography.sectionTitle,
     color: Colors.white,
     marginTop: Spacing.xxs,
   },
-  heroText: {
+  decisionText: {
     ...Typography.body,
     color: Colors.textMuted,
     marginTop: Spacing.xs,
   },
-  statusColumn: {
-    backgroundColor: Colors.surface,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    minWidth: 220,
-    padding: Spacing.md,
+  engineActions: {
+    gap: Spacing.sm,
+    minWidth: 210,
   },
-  statusLabel: {
-    ...Typography.label,
-    color: Colors.textMuted,
-  },
-  statusValue: {
-    ...Typography.bodyStrong,
-    color: Colors.white,
-    marginTop: Spacing.xxs,
-  },
-  statusProgress: {
-    ...Typography.caption,
-    color: Colors.textMuted,
-    marginTop: Spacing.xxs,
-  },
-  summaryGrid: {
+  metrics: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.md,
@@ -1102,79 +739,38 @@ const styles = StyleSheet.create({
   metricValue: {
     ...Typography.metric,
     color: Colors.white,
-    marginTop: Spacing.md,
   },
   metricLabel: {
     ...Typography.caption,
     color: Colors.textMuted,
     marginTop: Spacing.xxs,
   },
-  workspaceGrid: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: Spacing.lg,
+  blockerList: {
+    gap: Spacing.sm,
   },
-  workspaceGridCompact: {
-    flexDirection: 'column',
-  },
-  mainColumn: {
-    flex: 1.7,
-    gap: Spacing.lg,
-    minWidth: 0,
-  },
-  sideColumn: {
-    flex: 1,
-    gap: Spacing.lg,
-    minWidth: 300,
-  },
-  detailGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-  },
-  detail: {
-    alignItems: 'flex-start',
-    backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.border,
+  blocker: {
+    alignItems: 'center',
+    backgroundColor:
+      'rgba(229, 57, 53, 0.08)',
+    borderColor: Colors.danger,
     borderRadius: Radius.md,
     borderWidth: 1,
     flexDirection: 'row',
-    flexGrow: 1,
     gap: Spacing.sm,
-    minWidth: 220,
     padding: Spacing.md,
   },
-  detailContent: {
-    flex: 1,
-  },
-  detailLabel: {
-    ...Typography.label,
-    color: Colors.textMuted,
-  },
-  detailValue: {
-    ...Typography.bodyStrong,
-    color: Colors.text,
-    marginTop: Spacing.xxs,
-  },
-  notesBlock: {
-    borderTopColor: Colors.border,
-    borderTopWidth: 1,
-    marginTop: Spacing.lg,
-    paddingTop: Spacing.lg,
-  },
-  notesLabel: {
-    ...Typography.label,
-    color: Colors.textMuted,
-  },
-  notesText: {
+  blockerText: {
     ...Typography.body,
     color: Colors.text,
-    marginTop: Spacing.xs,
+    flex: 1,
   },
-  checklist: {
+  blockerButton: {
+    marginTop: Spacing.lg,
+  },
+  itemList: {
     gap: Spacing.sm,
   },
-  requirementRow: {
+  itemRow: {
     alignItems: 'center',
     backgroundColor: Colors.surfaceRaised,
     borderColor: Colors.border,
@@ -1184,32 +780,32 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     padding: Spacing.md,
   },
-  requirementRowPressed: {
+  pressed: {
     opacity: 0.82,
   },
-  requirementOrder: {
+  order: {
     alignItems: 'center',
     backgroundColor: Colors.surface,
     borderRadius: Radius.pill,
-    height: 32,
+    height: 34,
     justifyContent: 'center',
-    width: 32,
+    width: 34,
   },
-  requirementOrderText: {
+  orderText: {
     ...Typography.caption,
     color: Colors.silver,
     fontWeight: '800',
   },
-  requirementContent: {
+  itemContent: {
     flex: 1,
   },
-  requirementTitleRow: {
+  itemTitleRow: {
     alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
   },
-  requirementTitle: {
+  itemTitle: {
     ...Typography.bodyStrong,
     color: Colors.white,
   },
@@ -1217,15 +813,26 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.textMuted,
   },
-  requiredText: {
+  required: {
     color: Colors.primary,
   },
-  requirementDetail: {
+  itemDetail: {
     ...Typography.caption,
     color: Colors.textMuted,
     marginTop: Spacing.xxs,
   },
-  requirementState: {
+  documentLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
+  },
+  documentName: {
+    ...Typography.caption,
+    color: Colors.silver,
+    flex: 1,
+  },
+  itemState: {
     alignItems: 'center',
     borderRadius: Radius.pill,
     borderWidth: 1,
@@ -1234,79 +841,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
   },
-  requirementStateText: {
+  itemStateText: {
     ...Typography.caption,
     fontWeight: '800',
-  },
-  actionStack: {
-    gap: Spacing.sm,
-  },
-  workspaceAction: {
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: Spacing.md,
-    padding: Spacing.md,
-  },
-  workspaceActionPressed: {
-    opacity: 0.82,
-  },
-  workspaceActionIcon: {
-    alignItems: 'center',
-    backgroundColor: Colors.primarySoft,
-    borderRadius: Radius.md,
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  workspaceActionContent: {
-    flex: 1,
-  },
-  workspaceActionTitle: {
-    ...Typography.bodyStrong,
-    color: Colors.white,
-  },
-  workspaceActionText: {
-    ...Typography.caption,
-    color: Colors.textMuted,
-    marginTop: Spacing.xxs,
-  },
-  decisionBox: {
-    alignItems: 'center',
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    padding: Spacing.lg,
-  },
-  decisionTitle: {
-    ...Typography.cardTitle,
-    marginTop: Spacing.sm,
-  },
-  decisionText: {
-    ...Typography.body,
-    color: Colors.textMuted,
-    marginTop: Spacing.xs,
-    textAlign: 'center',
-  },
-  decisionButton: {
-    marginTop: Spacing.md,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xxl,
-  },
-  emptyTitle: {
-    ...Typography.cardTitle,
-    color: Colors.white,
-    marginTop: Spacing.md,
-  },
-  emptyText: {
-    ...Typography.body,
-    color: Colors.textMuted,
-    marginTop: Spacing.xs,
-    maxWidth: 520,
-    textAlign: 'center',
   },
 });

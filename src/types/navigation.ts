@@ -45,6 +45,11 @@ export type RootStackParamList = {
     applicationCaseId: string;
   };
 
+  ApplicationAutofill: {
+    clientId: string;
+    applicationCaseId: string;
+  };
+
   ApplicationCases: {
     clientId: string;
   };

@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import ApplicationCaseFormScreen from '../screens/ApplicationCaseFormScreen';
 import ApplicationReadinessScreen from '../screens/ApplicationReadinessScreen';
 import ApplicationPackGeneratorScreen from '../screens/ApplicationPackGeneratorScreen';
+import ApplicationAutofillScreen from '../screens/ApplicationAutofillScreen';
 import ApplicationCasesScreen from '../screens/ApplicationCasesScreen';
 import ClientFormScreen from '../screens/ClientFormScreen';
 import ClientProfileScreen from '../screens/ClientProfileScreen';
@@ -159,6 +160,14 @@ export default function AppNavigator() {
           name="ApplicationPackGenerator"
           options={{
             title: 'Application pack generator',
+          }}
+        />
+
+        <Stack.Screen
+          component={ApplicationAutofillScreen}
+          name="ApplicationAutofill"
+          options={{
+            title: 'Application AutoFill',
           }}
         />
 
