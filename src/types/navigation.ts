@@ -3,6 +3,8 @@ import type { CompetencyCategory } from './competency';
 export type RootStackParamList = {
   Dashboard: undefined;
 
+  ReferenceLibrary: undefined;
+
   Clients: undefined;
 
   ClientForm:
@@ -54,6 +56,9 @@ export type RootStackParamList = {
 
   DocumentLibrary: {
     clientId: string;
+    applicationCaseId?: string;
+    documentType?: import('./document').DocumentType;
+    openUpload?: boolean;
   };
 
   DocumentTemplates: {

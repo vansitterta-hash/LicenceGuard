@@ -15,6 +15,10 @@ import {
   CalendarClock,
   Edit3,
   FileText,
+  FolderOpen,
+  Gauge,
+  Target,
+  FileCheck2,
   Mail,
   MapPin,
   Phone,
@@ -268,6 +272,19 @@ export default function ClientProfileScreen({
           />
         </View>
       </View>
+
+      <Card
+        subtitle="Open every part of this client's LicenceGuard record."
+        title="Client workspace"
+      >
+        <View style={styles.workspaceGrid}>
+          <Button leftIcon={<ShieldCheck color={Colors.silver} size={18} />} onPress={() => navigation.navigate('Competencies', { clientId: client.id })} style={styles.workspaceButton} title="Competencies" variant="secondary" />
+          <Button leftIcon={<Target color={Colors.silver} size={18} />} onPress={() => navigation.navigate('Firearms', { clientId: client.id })} style={styles.workspaceButton} title="Firearms" variant="secondary" />
+          <Button leftIcon={<FolderOpen color={Colors.silver} size={18} />} onPress={() => navigation.navigate('DocumentLibrary', { clientId: client.id })} style={styles.workspaceButton} title="Documents" variant="secondary" />
+          <Button leftIcon={<Gauge color={Colors.silver} size={18} />} onPress={() => navigation.navigate('ApplicationReadiness', { clientId: client.id })} style={styles.workspaceButton} title="Readiness" variant="secondary" />
+          <Button leftIcon={<FileCheck2 color={Colors.white} size={18} />} onPress={() => navigation.navigate('ApplicationCases', { clientId: client.id })} style={styles.workspaceButton} title="Applications" />
+        </View>
+      </Card>
 
       <Card
         padding="large"
@@ -1105,6 +1122,16 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.textMuted,
     marginTop: Spacing.xxs,
+  },
+  workspaceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
+    marginBottom: Spacing.xxl,
+  },
+  workspaceButton: {
+    flexGrow: 1,
+    minWidth: 180,
   },
   columns: {
     flexDirection: 'row',

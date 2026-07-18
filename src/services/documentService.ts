@@ -25,6 +25,7 @@ export type UploadClientDocumentInput = {
   dealerId: string;
   clientId: string;
   userId: string;
+  applicationCaseId?: string;
   documentType: DocumentType;
   documentName: string;
   documentDate?: string;
@@ -178,10 +179,10 @@ export async function uploadClientDocument(
       competency_id: null,
       firearm_id: null,
       firearm_licence_id: null,
-      application_case_id: null,
+      application_case_id: input.applicationCaseId ?? null,
       parent_document_id: null,
       document_type: input.documentType,
-      document_scope: 'CLIENT',
+      document_scope: input.applicationCaseId ? 'APPLICATION_CASE' : 'CLIENT',
       lifecycle_status: 'ACTIVE',
       document_name: input.documentName.trim(),
       document_date: emptyToNull(input.documentDate),

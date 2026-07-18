@@ -23,6 +23,7 @@ type CaseRow = {
   firearm_id: string | null;
   firearm_licence_id: string | null;
   licence_section: string | null;
+  acquisition_source: 'DEALER' | 'PRIVATE_SELLER' | 'EXISTING_FIREARM' | 'NOT_APPLICABLE' | null;
 };
 type CompetencyRow = {
   id: string;
@@ -174,7 +175,34 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const licence = applicationCase.firearm_licence_id ? licenceById.get(applicationCase.firearm_licence_id) : undefined;
     const category = applicationCase.competency_category ?? firearm?.required_competency ?? null;
     const matchingCompetency = category ? competencies.find((item) => item.category === category) : undefined;
-    const definitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
+    const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
+    const definitions: RequirementDefinition[] = [...baseDefinitions];
+
+    if (applicationCase.acquisition_source === 'DEALER') {
+      definitions.push(
+        { key: 'PURCHASE_INVOICE', label: 'Dealer invoice or sale document', detail: 'Dealer invoice or sale document identifying the firearm and purchaser.', documentType: 'PURCHASE_INVOICE', required: true },
+        { key: 'DEALER_STOCK_DOCUMENT', label: 'Dealer stock document', detail: 'Dealer stock, transfer or equivalent supporting document for the firearm.', documentType: 'DEALER_STOCK_DOCUMENT', required: true },
+      );
+    }
+
+    if (applicationCase.acquisition_source === 'PRIVATE_SELLER') {
+      definitions.push(
+        { key: 'SELLER_ID_COPY', label: 'Private seller ID copy', detail: 'A clear copy of the private seller’s identity document.', documentType: 'SELLER_ID_COPY', required: true },
+        { key: 'SELLER_LICENCE_COPY', label: 'Seller firearm licence copy', detail: 'A copy of the seller’s firearm licence for the firearm being sold.', documentType: 'SELLER_LICENCE_COPY', required: true },
+        { key: 'PURCHASE_INVOICE', label: 'Private sale agreement', detail: 'Signed sale agreement or equivalent proof of the private sale.', documentType: 'PURCHASE_INVOICE', required: true },
+      );
+    }
+
+    const section = (applicationCase.licence_section ?? licence?.licence_section ?? '').replace(/[^0-9]/g, '');
+    if (section === '16') {
+      definitions.push(
+        { key: 'DEDICATED_STATUS', label: 'Dedicated status certificate', detail: 'Recommended supporting evidence for a Section 16 application.', documentType: 'DEDICATED_STATUS', required: false },
+        { key: 'GOOD_STANDING', label: 'Good-standing letter', detail: 'Recommended proof that the applicant remains in good standing.', documentType: 'GOOD_STANDING', required: false },
+        { key: 'MEMBERSHIP_CERTIFICATE', label: 'Membership certificate', detail: 'Recommended current membership evidence.', documentType: 'MEMBERSHIP_CERTIFICATE', required: false },
+        { key: 'ENDORSEMENT', label: 'Endorsement', detail: 'Recommended firearm-specific endorsement where available.', documentType: 'ENDORSEMENT', required: false },
+        { key: 'SUPPORTING_RESEARCH', label: 'Firearm or calibre research', detail: 'Optional supporting research that strengthens the motivation.', documentType: 'SUPPORTING_RESEARCH', required: false },
+      );
+    }
 
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;

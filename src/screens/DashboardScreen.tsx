@@ -2,6 +2,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -10,6 +11,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   CalendarClock,
+  BookOpen,
   FileCheck2,
   LogOut,
   Search,
@@ -194,8 +196,15 @@ export default function DashboardScreen({
           const Icon = summary.icon;
 
           return (
-            <Card
+            <Pressable
               key={summary.label}
+              onPress={() => navigation.navigate('Clients')}
+              style={({ pressed }) => [
+                styles.summaryPressable,
+                pressed ? styles.summaryPressed : null,
+              ]}
+            >
+            <Card
               style={styles.summaryCard}
             >
               <View style={styles.summaryIcon}>
@@ -213,9 +222,34 @@ export default function DashboardScreen({
                 {summary.label}
               </Text>
             </Card>
+            </Pressable>
           );
         })}
       </View>
+
+      <Card
+        subtitle="Search the classified motivations, research and supporting documents drawn from successful application packs."
+        title="Reference library"
+      >
+        <Text style={styles.moduleText}>
+          Use proven examples by calibre, firearm, application folder and document type while preparing a new case.
+        </Text>
+
+        <Button
+          leftIcon={
+            <BookOpen
+              color={Colors.silver}
+              size={19}
+            />
+          }
+          onPress={() =>
+            navigation.navigate('ReferenceLibrary')
+          }
+          style={styles.moduleButton}
+          title="Open reference library"
+          variant="secondary"
+        />
+      </Card>
 
       <Card
         subtitle="Add, search and review firearm-owner records."
@@ -343,6 +377,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.md,
     marginBottom: Spacing.xxl,
+  },
+  summaryPressable: {
+    flexBasis: 220,
+    flexGrow: 1,
+  },
+  summaryPressed: {
+    opacity: 0.82,
   },
   summaryCard: {
     flexGrow: 1,

@@ -12,6 +12,12 @@ export type ApplicationCaseType =
   | 'TEMPORARY_AUTHORISATION'
   | 'APPEAL_OR_RECONSIDERATION';
 
+export type FirearmAcquisitionSource =
+  | 'DEALER'
+  | 'PRIVATE_SELLER'
+  | 'EXISTING_FIREARM'
+  | 'NOT_APPLICABLE';
+
 export type ApplicationCaseStatus =
   | 'NOT_STARTED'
   | 'CLIENT_CONTACTED'
@@ -40,6 +46,14 @@ export type ApplicationCaseRecord = {
   firearm_id: string | null;
   firearm_licence_id: string | null;
   licence_section: string | null;
+
+  acquisition_source: FirearmAcquisitionSource;
+  supplier_name: string | null;
+  supplier_id_or_registration: string | null;
+  supplier_contact: string | null;
+  supplier_licence_number: string | null;
+  sale_or_invoice_reference: string | null;
+  motivation_summary: string | null;
 
   opened_date: string;
   target_submission_date: string | null;
@@ -91,6 +105,14 @@ export type ApplicationCaseFormValues = {
   firearmLicenceId: string;
   licenceSection: string;
 
+  acquisitionSource: FirearmAcquisitionSource;
+  supplierName: string;
+  supplierIdOrRegistration: string;
+  supplierContact: string;
+  supplierLicenceNumber: string;
+  saleOrInvoiceReference: string;
+  motivationSummary: string;
+
   openedDate: string;
   targetSubmissionDate: string;
   actualSubmissionDate: string;
@@ -112,6 +134,43 @@ export type ApplicationCaseSubjectOption = {
   label: string;
   secondaryLabel: string;
 };
+
+
+export const FIREARM_ACQUISITION_SOURCES: Array<{
+  value: FirearmAcquisitionSource;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'DEALER',
+    label: 'Dealer purchase',
+    description: 'The firearm is being supplied by a licensed firearms dealer.',
+  },
+  {
+    value: 'PRIVATE_SELLER',
+    label: 'Private sale',
+    description: 'The firearm is being purchased or transferred from a private individual.',
+  },
+  {
+    value: 'EXISTING_FIREARM',
+    label: 'Existing firearm',
+    description: 'Use for a renewal, reapplication or another case involving a firearm already held by the client.',
+  },
+  {
+    value: 'NOT_APPLICABLE',
+    label: 'Not applicable',
+    description: 'Use for competency-only applications and cases without a firearm supplier.',
+  },
+];
+
+export function isNewFirearmLicenceApplication(
+  applicationType: ApplicationCaseType
+): boolean {
+  return [
+    'FIREARM_LICENCE_FIRST_APPLICATION',
+    'FIREARM_LICENCE_ADDITIONAL_APPLICATION',
+  ].includes(applicationType);
+}
 
 export const APPLICATION_CASE_TYPES: Array<{
   value: ApplicationCaseType;

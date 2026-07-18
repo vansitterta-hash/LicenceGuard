@@ -423,9 +423,12 @@ function ApplicationCaseCard({
   const visual = getCaseVisual(applicationCase);
 
   return (
-    <View
-      style={[
+    <Pressable
+      accessibilityRole="button"
+      onPress={onEdit}
+      style={({ pressed }) => [
         styles.caseCard,
+        pressed ? styles.caseCardPressed : null,
         {
           borderColor: visual.borderColor,
         },
@@ -596,7 +599,7 @@ function ApplicationCaseCard({
           variant="danger"
         />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -879,6 +882,9 @@ const styles = StyleSheet.create({
   },
   caseList: {
     gap: Spacing.lg,
+  },
+  caseCardPressed: {
+    opacity: 0.86,
   },
   caseCard: {
     backgroundColor: Colors.surfaceRaised,

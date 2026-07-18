@@ -30,7 +30,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "tsc": "node --stack_size=16384 ./node_modules/typescript/lib/tsc.js --noEmit"
+    "tsc": "node --stack_size=16384 ./node_modules/typescript/lib/tsc.js --noEmit",
+    "import:reference-library": "node scripts/import-reference-library.mjs"
   },
   "private": true
 }

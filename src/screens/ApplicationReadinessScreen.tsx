@@ -285,6 +285,14 @@ export default function ApplicationReadinessScreen({
                     applicationCase.caseId,
                 })
               }
+              onDocument={(documentType) =>
+                navigation.navigate('DocumentLibrary', {
+                  clientId: data.clientId,
+                  applicationCaseId: applicationCase.caseId,
+                  documentType,
+                  openUpload: true,
+                })
+              }
               onGenerate={() =>
                 navigation.navigate('ApplicationPackGenerator', {
                   clientId: data.clientId,
@@ -313,12 +321,14 @@ function CaseReadinessCard({
   onToggle,
   onEdit,
   onGenerate,
+  onDocument,
 }: {
   applicationCase: ApplicationCaseReadiness;
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onGenerate: () => void;
+  onDocument: (documentType: import('../types/document').DocumentType) => void;
 }) {
   const visual = getStateVisual(applicationCase.state);
 
@@ -440,6 +450,7 @@ function CaseReadinessCard({
                   detail={requirement.detail}
                   required={requirement.required}
                   state={requirement.state}
+                  onPress={requirement.documentType ? () => onDocument(requirement.documentType!) : undefined}
                 />
               )
             )}
@@ -488,16 +499,18 @@ function RequirementRow({
   detail,
   state,
   required,
+  onPress,
 }: {
   label: string;
   detail: string;
   state: RequirementState;
   required: boolean;
+  onPress?: () => void;
 }) {
   const visual = getRequirementVisual(state);
 
-  return (
-    <View style={styles.requirementRow}>
+  const content = (
+    <>
       <visual.Icon
         color={visual.color}
         size={20}
@@ -525,7 +538,20 @@ function RequirementRow({
       >
         {visual.label}
       </Text>
-    </View>
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={styles.requirementRow}>{content}</View>;
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.requirementRow, pressed ? styles.pressed : null]}
+    >
+      {content}
+    </Pressable>
   );
 }
 

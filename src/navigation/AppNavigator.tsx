@@ -3,20 +3,7 @@ import {
   NavigationContainer,
   type Theme,
 } from '@react-navigation/native';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import {
-  FileCheck2,
-  FolderOpen,
-  Gauge,
-  ShieldCheck,
-  Target,
-} from 'lucide-react-native';
 
 import ApplicationCaseFormScreen from '../screens/ApplicationCaseFormScreen';
 import ApplicationReadinessScreen from '../screens/ApplicationReadinessScreen';
@@ -28,13 +15,11 @@ import ClientsScreen from '../screens/ClientsScreen';
 import CompetenciesScreen from '../screens/CompetenciesScreen';
 import CompetencyFormScreen from '../screens/CompetencyFormScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import ReferenceLibraryScreen from '../screens/ReferenceLibraryScreen';
 import FirearmFormScreen from '../screens/FirearmFormScreen';
 import FirearmsScreen from '../screens/FirearmsScreen';
 import DocumentLibraryScreen from '../screens/DocumentLibraryScreen';
 import { Colors } from '../theme/colors';
-import { Radius } from '../theme/radius';
-import { Spacing } from '../theme/spacing';
-import { Typography } from '../theme/typography';
 import type { RootStackParamList } from '../types/navigation';
 
 const Stack =
@@ -84,6 +69,14 @@ export default function AppNavigator() {
         />
 
         <Stack.Screen
+          component={ReferenceLibraryScreen}
+          name="ReferenceLibrary"
+          options={{
+            title: 'Reference library',
+          }}
+        />
+
+        <Stack.Screen
           component={ClientsScreen}
           name="Clients"
           options={{
@@ -104,157 +97,9 @@ export default function AppNavigator() {
         <Stack.Screen
           component={ClientProfileScreen}
           name="ClientProfile"
-          options={({ navigation, route }) => ({
+          options={{
             title: 'Client profile',
-            headerRight: () => (
-              <View style={styles.headerActions}>
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate(
-                      'Competencies',
-                      {
-                        clientId:
-                          route.params.clientId,
-                      }
-                    )
-                  }
-                  style={({ pressed }) => [
-                    styles.headerAction,
-                    pressed
-                      ? styles.headerActionPressed
-                      : null,
-                  ]}
-                >
-                  <ShieldCheck
-                    color={Colors.primary}
-                    size={17}
-                  />
-
-                  <Text
-                    style={styles.headerActionText}
-                  >
-                    Competencies
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate(
-                      'Firearms',
-                      {
-                        clientId:
-                          route.params.clientId,
-                      }
-                    )
-                  }
-                  style={({ pressed }) => [
-                    styles.headerAction,
-                    pressed
-                      ? styles.headerActionPressed
-                      : null,
-                  ]}
-                >
-                  <Target
-                    color={Colors.primary}
-                    size={17}
-                  />
-
-                  <Text
-                    style={styles.headerActionText}
-                  >
-                    Firearms
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate(
-                      'DocumentLibrary',
-                      {
-                        clientId:
-                          route.params.clientId,
-                      }
-                    )
-                  }
-                  style={({ pressed }) => [
-                    styles.headerAction,
-                    pressed
-                      ? styles.headerActionPressed
-                      : null,
-                  ]}
-                >
-                  <FolderOpen
-                    color={Colors.primary}
-                    size={17}
-                  />
-
-                  <Text
-                    style={styles.headerActionText}
-                  >
-                    Documents
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate(
-                      'ApplicationReadiness',
-                      {
-                        clientId:
-                          route.params.clientId,
-                      }
-                    )
-                  }
-                  style={({ pressed }) => [
-                    styles.headerAction,
-                    pressed
-                      ? styles.headerActionPressed
-                      : null,
-                  ]}
-                >
-                  <Gauge
-                    color={Colors.primary}
-                    size={17}
-                  />
-
-                  <Text
-                    style={styles.headerActionText}
-                  >
-                    Readiness
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate(
-                      'ApplicationCases',
-                      {
-                        clientId:
-                          route.params.clientId,
-                      }
-                    )
-                  }
-                  style={({ pressed }) => [
-                    styles.headerAction,
-                    pressed
-                      ? styles.headerActionPressed
-                      : null,
-                  ]}
-                >
-                  <FileCheck2
-                    color={Colors.primary}
-                    size={17}
-                  />
-
-                  <Text
-                    style={styles.headerActionText}
-                  >
-                    Applications
-                  </Text>
-                </Pressable>
-              </View>
-            ),
-          })}
+          }}
         />
 
         <Stack.Screen
@@ -338,29 +183,3 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  headerActions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  headerAction: {
-    alignItems: 'center',
-    backgroundColor: Colors.primarySoft,
-    borderColor: Colors.primaryDark,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  headerActionPressed: {
-    opacity: 0.8,
-  },
-  headerActionText: {
-    ...Typography.caption,
-    color: Colors.primary,
-    fontWeight: '800',
-    marginLeft: Spacing.xs,
-  },
-});

@@ -165,6 +165,15 @@ export default function DocumentLibraryScreen({
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!route.params.openUpload) return;
+    setForm((current) => ({
+      ...current,
+      documentType: route.params.documentType ?? current.documentType,
+    }));
+    setUploadVisible(true);
+  }, [route.params.documentType, route.params.openUpload]);
+
   const activeDocuments = useMemo(
     () =>
       data?.documents.filter(
@@ -277,6 +286,7 @@ export default function DocumentLibraryScreen({
         dealerId: dealerProfile.dealerId,
         clientId: route.params.clientId,
         userId: user.id,
+        applicationCaseId: route.params.applicationCaseId,
         documentType: form.documentType,
         documentName: form.documentName,
         documentDate: form.documentDate,
