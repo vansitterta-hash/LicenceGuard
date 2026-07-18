@@ -1,120 +1,1312 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AlertTriangle, CheckCircle2, FileOutput, FolderOpen, Printer, RefreshCw } from 'lucide-react-native';
+import {
+  BookOpen,
+  CheckCircle2,
+  CircleAlert,
+  ClipboardCheck,
+  Edit3,
+  FileCheck2,
+  FileText,
+  FolderOpen,
+  RefreshCw,
+  ShieldCheck,
+  Target,
+  TriangleAlert,
+  Upload,
+  UserRound,
+} from 'lucide-react-native';
 
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Screen from '../components/Screen';
-import { useAuth } from '../context/AuthContext';
-import { buildApplicationPackHtml, getApplicationPackData, openApplicationPackHtml } from '../services/applicationPackService';
+import { getApplicationCase } from '../services/applicationCaseService';
+import { getClientApplicationReadiness } from '../services/applicationReadinessService';
+import { getClient } from '../services/clientService';
+import { listClientFirearms } from '../services/firearmService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
-import type { ApplicationPackData } from '../types/applicationPack';
+import {
+  getApplicationCaseStatusLabel,
+  getApplicationCaseTypeLabel,
+  isCompetencyApplicationType,
+  type ApplicationCaseListItem,
+} from '../types/applicationCase';
+import type { ClientRecord } from '../types/client';
+import type { DocumentType } from '../types/document';
+import type { FirearmListItem } from '../types/firearm';
 import type { RootStackParamList } from '../types/navigation';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationPackGenerator'>;
+type Props = NativeStackScreenProps<
+  RootStackParamList,
+  'ApplicationPackGenerator'
+>;
 
-export default function ApplicationPackGeneratorScreen({ navigation, route }: Props) {
-  const { dealerProfile } = useAuth();
-  const [data, setData] = useState<ApplicationPackData | null>(null);
+type RequirementItem = {
+  key: string;
+  label: string;
+  detail: string;
+  required: boolean;
+  state:
+    | 'PRESENT'
+    | 'MISSING'
+    | 'EXPIRED'
+    | 'UNVERIFIED'
+    | 'NOT_APPLICABLE';
+  documentType: DocumentType | null;
+};
+
+type CaseReadiness = {
+  caseId: string;
+  state:
+    | 'READY'
+    | 'ACTION_REQUIRED'
+    | 'BLOCKED'
+    | 'NOT_STARTED';
+  readinessPercent: number;
+  requirements: RequirementItem[];
+};
+
+type WorkspaceData = {
+  client: ClientRecord;
+  applicationCase: ApplicationCaseListItem;
+  firearm: FirearmListItem | null;
+  readiness: CaseReadiness | null;
+};
+
+export default function ApplicationPackGeneratorScreen({
+  navigation,
+  route,
+}: Props) {
+  const { width } = useWindowDimensions();
+  const [data, setData] = useState<WorkspaceData | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
 
-  const load = useCallback(async () => {
+  const isCompact = width < 820;
+
+  const loadData = useCallback(async () => {
     setLoading(true);
+
     try {
-      setData(await getApplicationPackData(route.params.clientId, route.params.applicationCaseId));
+      const [
+        client,
+        applicationCase,
+        firearms,
+        readinessResult,
+      ] = await Promise.all([
+        getClient(route.params.clientId),
+        getApplicationCase(
+          route.params.applicationCaseId
+        ),
+        listClientFirearms(route.params.clientId),
+        getClientApplicationReadiness(
+          route.params.clientId
+        ),
+      ]);
+
+      const readiness =
+        (
+          readinessResult as unknown as {
+            cases?: CaseReadiness[];
+          }
+        ).cases?.find(
+          (item) =>
+            item.caseId ===
+            route.params.applicationCaseId
+        ) ?? null;
+
+      const firearm =
+        firearms.find(
+          (item) =>
+            item.id === applicationCase.firearm_id
+        ) ?? null;
+
+      setData({
+        client,
+        applicationCase,
+        firearm,
+        readiness,
+      });
     } catch (error) {
-      Alert.alert('Unable to prepare application pack', error instanceof Error ? error.message : 'An unknown error occurred.');
+      Alert.alert(
+        'Unable to load application workspace',
+        error instanceof Error
+          ? error.message
+          : 'An unknown error occurred.'
+      );
     } finally {
       setLoading(false);
     }
-  }, [route.params.applicationCaseId, route.params.clientId]);
+  }, [
+    route.params.applicationCaseId,
+    route.params.clientId,
+  ]);
 
   useEffect(() => {
-    void load();
-    return navigation.addListener('focus', () => void load());
-  }, [load, navigation]);
+    void loadData();
 
-  const readyDocuments = data?.documents.length ?? 0;
-  const statusColor = data?.readyToGenerate ? Colors.success : Colors.warning;
-  const generationMessage = useMemo(() => {
-    if (!data) return '';
-    if (data.readyToGenerate) return 'All mandatory readiness checks have passed. The pack can be printed or saved as PDF.';
-    return 'A draft pack can still be reviewed, but missing, expired or unverified items must be resolved before submission.';
-  }, [data]);
+    const unsubscribe = navigation.addListener(
+      'focus',
+      () => {
+        void loadData();
+      }
+    );
 
-  const generate = async () => {
-    if (!data) return;
-    setGenerating(true);
-    try {
-      const html = buildApplicationPackHtml(data, dealerProfile?.dealerName ?? 'LicenceGuard');
-      openApplicationPackHtml(html);
-    } catch (error) {
-      Alert.alert('Unable to open application pack', error instanceof Error ? error.message : 'An unknown error occurred.');
-    } finally {
-      setGenerating(false);
-    }
-  };
+    return unsubscribe;
+  }, [loadData, navigation]);
+
+  const counts = useMemo(() => {
+    const requirements =
+      data?.readiness?.requirements ?? [];
+
+    return {
+      total: requirements.length,
+      complete: requirements.filter(
+        (item) => item.state === 'PRESENT'
+      ).length,
+      missing: requirements.filter(
+        (item) =>
+          item.state === 'MISSING' ||
+          item.state === 'EXPIRED'
+      ).length,
+      unverified: requirements.filter(
+        (item) => item.state === 'UNVERIFIED'
+      ).length,
+    };
+  }, [data?.readiness?.requirements]);
 
   if (loading || !data) {
-    return <Screen scroll={false}><View style={styles.loading}><ActivityIndicator color={Colors.primary} size="large"/><Text style={styles.muted}>Preparing application pack...</Text></View></Screen>;
+    return (
+      <Screen scroll={false}>
+        <View style={styles.loadingState}>
+          <ActivityIndicator
+            color={Colors.primary}
+            size="large"
+          />
+
+          <Text style={styles.loadingText}>
+            Building application workspace...
+          </Text>
+        </View>
+      </Screen>
+    );
   }
 
+  const visual = getReadinessVisual(
+    data.readiness?.state ?? 'NOT_STARTED'
+  );
+
+  const competencyApplication =
+    isCompetencyApplicationType(
+      data.applicationCase.application_type
+    );
+
+  const subjectTitle = competencyApplication
+    ? data.applicationCase.subjectDescription
+    : data.firearm
+      ? [data.firearm.make, data.firearm.model]
+          .filter(Boolean)
+          .join(' ')
+      : data.applicationCase.subjectDescription;
+
+  const secondarySubject = competencyApplication
+    ? 'Competency application'
+    : data.firearm
+      ? `${data.firearm.calibre} • ${data.firearm.serial_number}`
+      : 'Firearm details unavailable';
+
   return (
-    <Screen maxWidth={1120}>
-      <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>APPLICATION PACK GENERATOR</Text>
-          <Text style={styles.title}>{data.client.fullName}</Text>
-          <Text style={styles.subtitle}>{data.applicationTypeLabel}</Text>
+    <Screen maxWidth={1180}>
+      <View
+        style={[
+          styles.header,
+          isCompact ? styles.headerCompact : null,
+        ]}
+      >
+        <View style={styles.headerContent}>
+          <Text style={styles.eyebrow}>
+            APPLICATION PACK WORKSPACE
+          </Text>
+
+          <Text style={styles.title}>
+            {subjectTitle}
+          </Text>
+
+          <Text style={styles.subtitle}>
+            {data.client.first_name}{' '}
+            {data.client.surname} •{' '}
+            {getApplicationCaseTypeLabel(
+              data.applicationCase.application_type
+            )}
+          </Text>
         </View>
-        <Button leftIcon={<RefreshCw color={Colors.silver} size={18}/>} onPress={() => void load()} title="Refresh" variant="secondary"/>
+
+        <View style={styles.headerActions}>
+          <Button
+            leftIcon={
+              <RefreshCw
+                color={Colors.silver}
+                size={18}
+              />
+            }
+            onPress={() => void loadData()}
+            title="Refresh"
+            variant="secondary"
+          />
+
+          <Button
+            leftIcon={
+              <Edit3
+                color={Colors.white}
+                size={18}
+              />
+            }
+            onPress={() =>
+              navigation.navigate(
+                'ApplicationCaseForm',
+                {
+                  clientId: data.client.id,
+                  applicationCaseId:
+                    data.applicationCase.id,
+                }
+              )
+            }
+            title="Edit application"
+          />
+        </View>
       </View>
 
-      <Card padding="large" style={[styles.statusCard, { borderColor: statusColor }]}> 
-        <View style={styles.statusRow}>
-          <View style={[styles.iconCircle, { backgroundColor: data.readyToGenerate ? 'rgba(40,199,111,0.12)' : 'rgba(255,193,7,0.12)' }]}>
-            {data.readyToGenerate ? <CheckCircle2 color={Colors.success} size={30}/> : <AlertTriangle color={Colors.warning} size={30}/>} 
+      <Card
+        padding="large"
+        style={[
+          styles.heroCard,
+          {
+            borderColor: visual.borderColor,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.heroRow,
+            isCompact ? styles.heroRowCompact : null,
+          ]}
+        >
+          <View
+            style={[
+              styles.heroIcon,
+              {
+                backgroundColor:
+                  visual.backgroundColor,
+              },
+            ]}
+          >
+            <visual.Icon
+              color={visual.color}
+              size={34}
+            />
           </View>
-          <View style={styles.statusCopy}>
-            <Text style={[styles.statusTitle, { color: statusColor }]}>{data.readyToGenerate ? 'READY TO GENERATE' : 'DRAFT PACK - ACTION REQUIRED'}</Text>
-            <Text style={styles.muted}>{generationMessage}</Text>
+
+          <View style={styles.heroContent}>
+            <Text
+              style={[
+                styles.heroState,
+                { color: visual.color },
+              ]}
+            >
+              {visual.label}
+            </Text>
+
+            <Text style={styles.heroTitle}>
+              {data.readiness
+                ? `${data.readiness.readinessPercent}% pack readiness`
+                : 'Readiness has not been calculated'}
+            </Text>
+
+            <Text style={styles.heroText}>
+              {visual.description}
+            </Text>
           </View>
-          <View style={styles.scoreBlock}><Text style={[styles.score, { color: statusColor }]}>{data.readinessScore}%</Text><Text style={styles.caption}>readiness</Text></View>
+
+          <View style={styles.statusColumn}>
+            <Text style={styles.statusLabel}>
+              CASE STATUS
+            </Text>
+
+            <Text style={styles.statusValue}>
+              {getApplicationCaseStatusLabel(
+                data.applicationCase.status
+              )}
+            </Text>
+
+            <Text style={styles.statusProgress}>
+              {data.applicationCase.progress_percent}%
+              workflow progress
+            </Text>
+          </View>
         </View>
       </Card>
 
-      <View style={styles.metrics}>
-        <Metric label="Pack documents" value={String(readyDocuments)}/>
-        <Metric label="Missing required" value={String(data.missingRequiredItems.length)}/>
-        <Metric label="Warnings" value={String(data.warnings.length)}/>
+      <View style={styles.summaryGrid}>
+        <MetricCard
+          icon={ClipboardCheck}
+          label="Pack items"
+          value={counts.total}
+        />
+
+        <MetricCard
+          icon={CheckCircle2}
+          label="Complete"
+          value={counts.complete}
+        />
+
+        <MetricCard
+          icon={TriangleAlert}
+          label="Missing or expired"
+          value={counts.missing}
+        />
+
+        <MetricCard
+          icon={CircleAlert}
+          label="Awaiting verification"
+          value={counts.unverified}
+        />
       </View>
 
-      {data.missingRequiredItems.length > 0 ? <Card style={styles.warningCard}><Text style={styles.cardTitle}>Missing required items</Text>{data.missingRequiredItems.map((item) => <Text key={item} style={styles.warningText}>• {item}</Text>)}</Card> : null}
+      <View
+        style={[
+          styles.workspaceGrid,
+          isCompact
+            ? styles.workspaceGridCompact
+            : null,
+        ]}
+      >
+        <View style={styles.mainColumn}>
+          <Card
+            subtitle="Everything connected to this application in one place."
+            title="Application overview"
+          >
+            <View style={styles.detailGrid}>
+              <Detail
+                icon={UserRound}
+                label="Applicant"
+                value={`${data.client.first_name} ${data.client.surname}`}
+              />
 
-      <Card padding="large">
-        <View style={styles.sectionHeader}><View><Text style={styles.cardTitle}>Pack contents</Text><Text style={styles.muted}>Documents are ordered according to the readiness checklist.</Text></View><Button leftIcon={<FolderOpen color={Colors.silver} size={18}/>} onPress={() => navigation.navigate('DocumentLibrary', { clientId: data.clientId })} title="Manage documents" variant="secondary"/></View>
-        {data.documents.length === 0 ? <Text style={styles.empty}>No eligible documents are currently linked to this client or application case.</Text> : data.documents.map((document) => <View key={document.documentId} style={styles.documentRow}><View style={styles.order}><Text style={styles.orderText}>{document.order}</Text></View><View style={styles.documentCopy}><Text style={styles.documentTitle}>{document.requirementLabel}</Text><Text style={styles.muted}>{document.documentName}</Text></View><Text style={[styles.badge, { color: document.isVerified ? Colors.success : Colors.warning }]}>{document.isVerified ? 'VERIFIED' : 'UNVERIFIED'}</Text></View>)}
-      </Card>
+              <Detail
+                icon={FileText}
+                label="Application"
+                value={getApplicationCaseTypeLabel(
+                  data.applicationCase
+                    .application_type
+                )}
+              />
 
-      <Card padding="large">
-        <Text style={styles.cardTitle}>Output</Text>
-        <Text style={styles.muted}>LicenceGuard creates a print-ready cover page, client particulars, readiness checklist and indexed secure links to the supporting documents. In the browser, choose Print and then Save as PDF.</Text>
-        <View style={styles.actions}>
-          <Button leftIcon={<Printer color={Colors.white} size={18}/>} loading={generating} onPress={() => void generate()} title={data.readyToGenerate ? 'Generate application pack' : 'Generate draft pack'}/>
-          <Button leftIcon={<FileOutput color={Colors.silver} size={18}/>} onPress={() => navigation.navigate('ApplicationReadiness', { clientId: data.clientId })} title="Return to readiness" variant="secondary"/>
+              <Detail
+                icon={
+                  competencyApplication
+                    ? ShieldCheck
+                    : Target
+                }
+                label={
+                  competencyApplication
+                    ? 'Competency'
+                    : 'Firearm'
+                }
+                value={secondarySubject}
+              />
+
+              <Detail
+                icon={ClipboardCheck}
+                label="Licence section"
+                value={
+                  data.applicationCase
+                    .licence_section
+                    ? `Section ${data.applicationCase.licence_section}`
+                    : 'Not applicable'
+                }
+              />
+
+              <Detail
+                icon={FileCheck2}
+                label="Acquisition source"
+                value={formatSource(
+                  data.applicationCase
+                    .acquisition_source
+                )}
+              />
+
+              <Detail
+                icon={UserRound}
+                label="Supplier"
+                value={
+                  data.applicationCase
+                    .supplier_name ??
+                  'Not applicable'
+                }
+              />
+            </View>
+
+            {data.applicationCase
+              .motivation_summary ? (
+              <View style={styles.notesBlock}>
+                <Text style={styles.notesLabel}>
+                  Motivation purpose
+                </Text>
+
+                <Text style={styles.notesText}>
+                  {
+                    data.applicationCase
+                      .motivation_summary
+                  }
+                </Text>
+              </View>
+            ) : null}
+          </Card>
+
+          <Card
+            subtitle="Required and recommended items are assembled in submission order."
+            title="Pack checklist"
+          >
+            {!data.readiness ? (
+              <View style={styles.emptyState}>
+                <CircleAlert
+                  color={Colors.warning}
+                  size={36}
+                />
+
+                <Text style={styles.emptyTitle}>
+                  No readiness result
+                </Text>
+
+                <Text style={styles.emptyText}>
+                  Open the readiness engine to calculate
+                  this application’s document
+                  requirements.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.checklist}>
+                {data.readiness.requirements.map(
+                  (requirement, index) => (
+                    <RequirementRow
+                      index={index + 1}
+                      key={requirement.key}
+                      onPress={() => {
+                        if (
+                          requirement.documentType
+                        ) {
+                          navigation.navigate(
+                            'DocumentLibrary',
+                            {
+                              clientId:
+                                data.client.id,
+                              applicationCaseId:
+                                data.applicationCase.id,
+                              documentType:
+                                requirement.documentType,
+                              openUpload:
+                                requirement.state !==
+                                'PRESENT',
+                            }
+                          );
+                        }
+                      }}
+                      requirement={requirement}
+                    />
+                  )
+                )}
+              </View>
+            )}
+          </Card>
         </View>
-      </Card>
+
+        <View style={styles.sideColumn}>
+          <Card
+            subtitle="Move through the complete application workflow."
+            title="Workspace actions"
+          >
+            <View style={styles.actionStack}>
+              <WorkspaceAction
+                description="Review every requirement and its current state."
+                icon={ClipboardCheck}
+                label="Open readiness"
+                onPress={() =>
+                  navigation.navigate(
+                    'ApplicationReadiness',
+                    {
+                      clientId: data.client.id,
+                    }
+                  )
+                }
+              />
+
+              <WorkspaceAction
+                description="Upload and manage applicant and case documents."
+                icon={FolderOpen}
+                label="Document library"
+                onPress={() =>
+                  navigation.navigate(
+                    'DocumentLibrary',
+                    {
+                      clientId: data.client.id,
+                      applicationCaseId:
+                        data.applicationCase.id,
+                    }
+                  )
+                }
+              />
+
+              <WorkspaceAction
+                description="Find motivations, research and supporting material."
+                icon={BookOpen}
+                label="Reference library"
+                onPress={() =>
+                  navigation.navigate(
+                    'ReferenceLibrary'
+                  )
+                }
+              />
+
+              <WorkspaceAction
+                description="Update application details, status and submission tracking."
+                icon={Edit3}
+                label="Edit application"
+                onPress={() =>
+                  navigation.navigate(
+                    'ApplicationCaseForm',
+                    {
+                      clientId: data.client.id,
+                      applicationCaseId:
+                        data.applicationCase.id,
+                    }
+                  )
+                }
+              />
+            </View>
+          </Card>
+
+          <Card
+            subtitle="LicenceGuard will only mark the pack ready when all blocking items are complete."
+            title="Pack decision"
+          >
+            <View
+              style={[
+                styles.decisionBox,
+                {
+                  borderColor:
+                    visual.borderColor,
+                  backgroundColor:
+                    visual.backgroundColor,
+                },
+              ]}
+            >
+              <visual.Icon
+                color={visual.color}
+                size={28}
+              />
+
+              <Text
+                style={[
+                  styles.decisionTitle,
+                  { color: visual.color },
+                ]}
+              >
+                {visual.label}
+              </Text>
+
+              <Text style={styles.decisionText}>
+                {visual.description}
+              </Text>
+            </View>
+
+            {counts.missing > 0 ? (
+              <Button
+                leftIcon={
+                  <Upload
+                    color={Colors.white}
+                    size={18}
+                  />
+                }
+                onPress={() => {
+                  const firstMissing =
+                    data.readiness?.requirements.find(
+                      (item) =>
+                        (item.state ===
+                          'MISSING' ||
+                          item.state ===
+                            'EXPIRED') &&
+                        item.documentType
+                    );
+
+                  navigation.navigate(
+                    'DocumentLibrary',
+                    {
+                      clientId: data.client.id,
+                      applicationCaseId:
+                        data.applicationCase.id,
+                      documentType:
+                        firstMissing?.documentType ??
+                        undefined,
+                      openUpload: true,
+                    }
+                  );
+                }}
+                style={styles.decisionButton}
+                title="Add missing document"
+              />
+            ) : null}
+          </Card>
+        </View>
+      </View>
     </Screen>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) { return <Card style={styles.metric}><Text style={styles.metricValue}>{value}</Text><Text style={styles.caption}>{label}</Text></Card>; }
+function RequirementRow({
+  index,
+  onPress,
+  requirement,
+}: {
+  index: number;
+  onPress: () => void;
+  requirement: RequirementItem;
+}) {
+  const visual = getRequirementVisual(
+    requirement.state
+  );
+
+  return (
+    <Pressable
+      disabled={!requirement.documentType}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.requirementRow,
+        pressed
+          ? styles.requirementRowPressed
+          : null,
+      ]}
+    >
+      <View style={styles.requirementOrder}>
+        <Text style={styles.requirementOrderText}>
+          {index}
+        </Text>
+      </View>
+
+      <View style={styles.requirementContent}>
+        <View style={styles.requirementTitleRow}>
+          <Text style={styles.requirementTitle}>
+            {requirement.label}
+          </Text>
+
+          <Text
+            style={[
+              styles.requirementType,
+              requirement.required
+                ? styles.requiredText
+                : null,
+            ]}
+          >
+            {requirement.required
+              ? 'Required'
+              : 'Recommended'}
+          </Text>
+        </View>
+
+        <Text style={styles.requirementDetail}>
+          {requirement.detail}
+        </Text>
+      </View>
+
+      <View
+        style={[
+          styles.requirementState,
+          {
+            borderColor: visual.color,
+            backgroundColor:
+              visual.backgroundColor,
+          },
+        ]}
+      >
+        <visual.Icon
+          color={visual.color}
+          size={16}
+        />
+
+        <Text
+          style={[
+            styles.requirementStateText,
+            { color: visual.color },
+          ]}
+        >
+          {visual.label}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function WorkspaceAction({
+  description,
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  description: string;
+  icon: typeof FileText;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.workspaceAction,
+        pressed
+          ? styles.workspaceActionPressed
+          : null,
+      ]}
+    >
+      <View style={styles.workspaceActionIcon}>
+        <Icon
+          color={Colors.primary}
+          size={21}
+        />
+      </View>
+
+      <View style={styles.workspaceActionContent}>
+        <Text style={styles.workspaceActionTitle}>
+          {label}
+        </Text>
+
+        <Text style={styles.workspaceActionText}>
+          {description}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof FileText;
+  label: string;
+  value: number;
+}) {
+  return (
+    <Card style={styles.metricCard}>
+      <Icon
+        color={Colors.primary}
+        size={22}
+      />
+
+      <Text style={styles.metricValue}>
+        {value}
+      </Text>
+
+      <Text style={styles.metricLabel}>
+        {label}
+      </Text>
+    </Card>
+  );
+}
+
+function Detail({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof FileText;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.detail}>
+      <Icon
+        color={Colors.primary}
+        size={19}
+      />
+
+      <View style={styles.detailContent}>
+        <Text style={styles.detailLabel}>
+          {label}
+        </Text>
+
+        <Text style={styles.detailValue}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function getReadinessVisual(
+  state:
+    | 'READY'
+    | 'ACTION_REQUIRED'
+    | 'BLOCKED'
+    | 'NOT_STARTED'
+) {
+  switch (state) {
+    case 'READY':
+      return {
+        label: 'Pack ready',
+        description:
+          'All blocking requirements are complete. The application pack can proceed to final review and submission preparation.',
+        color: Colors.success,
+        borderColor: Colors.success,
+        backgroundColor:
+          'rgba(40, 199, 111, 0.10)',
+        Icon: CheckCircle2,
+      };
+
+    case 'ACTION_REQUIRED':
+      return {
+        label: 'Verification required',
+        description:
+          'The documents are present, but one or more items still require verification before the pack is submission-ready.',
+        color: Colors.warning,
+        borderColor: Colors.warning,
+        backgroundColor:
+          'rgba(255, 193, 7, 0.10)',
+        Icon: CircleAlert,
+      };
+
+    case 'BLOCKED':
+      return {
+        label: 'Pack blocked',
+        description:
+          'One or more required documents are missing or expired. Resolve the blocking items before generating the final pack.',
+        color: Colors.danger,
+        borderColor: Colors.danger,
+        backgroundColor:
+          'rgba(229, 57, 53, 0.10)',
+        Icon: TriangleAlert,
+      };
+
+    default:
+      return {
+        label: 'Not yet assessed',
+        description:
+          'Run the readiness engine to determine the complete application pack requirements.',
+        color: Colors.silver,
+        borderColor: Colors.borderStrong,
+        backgroundColor: Colors.surfaceSoft,
+        Icon: ClipboardCheck,
+      };
+  }
+}
+
+function getRequirementVisual(
+  state: RequirementItem['state']
+) {
+  switch (state) {
+    case 'PRESENT':
+      return {
+        label: 'Complete',
+        color: Colors.success,
+        backgroundColor:
+          'rgba(40, 199, 111, 0.10)',
+        Icon: CheckCircle2,
+      };
+
+    case 'UNVERIFIED':
+      return {
+        label: 'Verify',
+        color: Colors.warning,
+        backgroundColor:
+          'rgba(255, 193, 7, 0.10)',
+        Icon: CircleAlert,
+      };
+
+    case 'EXPIRED':
+      return {
+        label: 'Expired',
+        color: Colors.danger,
+        backgroundColor:
+          'rgba(229, 57, 53, 0.10)',
+        Icon: TriangleAlert,
+      };
+
+    case 'NOT_APPLICABLE':
+      return {
+        label: 'N/A',
+        color: Colors.silverDark,
+        backgroundColor: Colors.surfaceSoft,
+        Icon: FileText,
+      };
+
+    default:
+      return {
+        label: 'Missing',
+        color: Colors.danger,
+        backgroundColor:
+          'rgba(229, 57, 53, 0.10)',
+        Icon: TriangleAlert,
+      };
+  }
+}
+
+function formatSource(
+  value:
+    | 'DEALER'
+    | 'PRIVATE_SELLER'
+    | 'EXISTING_FIREARM'
+    | 'NOT_APPLICABLE'
+): string {
+  switch (value) {
+    case 'DEALER':
+      return 'Dealer purchase';
+    case 'PRIVATE_SELLER':
+      return 'Private sale';
+    case 'EXISTING_FIREARM':
+      return 'Existing firearm';
+    default:
+      return 'Not applicable';
+  }
+}
 
 const styles = StyleSheet.create({
-  loading:{flex:1,alignItems:'center',justifyContent:'center',gap:Spacing.md}, muted:{...Typography.body,color:Colors.textMuted}, header:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',gap:Spacing.lg,marginBottom:Spacing.lg,flexWrap:'wrap'}, headerCopy:{flex:1,minWidth:280}, eyebrow:{...Typography.eyebrow,color:Colors.primary}, title:{...Typography.pageTitle,color:Colors.white,marginTop:Spacing.xs}, subtitle:{...Typography.body,color:Colors.textMuted,marginTop:Spacing.xs}, statusCard:{borderWidth:1}, statusRow:{flexDirection:'row',alignItems:'center',gap:Spacing.lg,flexWrap:'wrap'}, iconCircle:{width:58,height:58,borderRadius:Radius.pill,alignItems:'center',justifyContent:'center'}, statusCopy:{flex:1,minWidth:240}, statusTitle:{...Typography.sectionTitle}, scoreBlock:{alignItems:'flex-end'}, score:{...Typography.metric,fontSize:40}, caption:{...Typography.caption,color:Colors.textMuted}, metrics:{flexDirection:'row',gap:Spacing.md,flexWrap:'wrap',marginVertical:Spacing.lg}, metric:{flex:1,minWidth:160}, metricValue:{...Typography.metric,color:Colors.white}, warningCard:{borderColor:Colors.warning,borderWidth:1,marginBottom:Spacing.lg}, warningText:{...Typography.body,color:Colors.warning,marginTop:Spacing.xs}, cardTitle:{...Typography.cardTitle,color:Colors.white}, sectionHeader:{flexDirection:'row',justifyContent:'space-between',gap:Spacing.md,alignItems:'center',flexWrap:'wrap',marginBottom:Spacing.md}, empty:{...Typography.body,color:Colors.textMuted,paddingVertical:Spacing.xl,textAlign:'center'}, documentRow:{flexDirection:'row',alignItems:'center',gap:Spacing.md,borderTopColor:Colors.border,borderTopWidth:1,paddingVertical:Spacing.md}, order:{width:34,height:34,borderRadius:Radius.pill,backgroundColor:Colors.primarySoft,alignItems:'center',justifyContent:'center'}, orderText:{...Typography.caption,color:Colors.primary,fontWeight:'900'}, documentCopy:{flex:1}, documentTitle:{...Typography.body,color:Colors.white,fontWeight:'800'}, badge:{...Typography.caption,fontWeight:'900'}, actions:{flexDirection:'row',gap:Spacing.md,flexWrap:'wrap',marginTop:Spacing.lg},
+  loadingState: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  loadingText: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.md,
+  },
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xxl,
+  },
+  headerCompact: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+    gap: Spacing.lg,
+  },
+  headerContent: {
+    flex: 1,
+    marginRight: Spacing.xl,
+  },
+  eyebrow: {
+    ...Typography.eyebrow,
+    color: Colors.primary,
+  },
+  title: {
+    ...Typography.pageTitle,
+    color: Colors.white,
+    marginTop: Spacing.xxs,
+  },
+  subtitle: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
+  },
+  heroCard: {
+    borderWidth: 1,
+    marginBottom: Spacing.lg,
+  },
+  heroRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.lg,
+  },
+  heroRowCompact: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+  },
+  heroIcon: {
+    alignItems: 'center',
+    borderRadius: Radius.lg,
+    height: 68,
+    justifyContent: 'center',
+    width: 68,
+  },
+  heroContent: {
+    flex: 1,
+  },
+  heroState: {
+    ...Typography.eyebrow,
+  },
+  heroTitle: {
+    ...Typography.sectionTitle,
+    color: Colors.white,
+    marginTop: Spacing.xxs,
+  },
+  heroText: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+  },
+  statusColumn: {
+    backgroundColor: Colors.surface,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    minWidth: 220,
+    padding: Spacing.md,
+  },
+  statusLabel: {
+    ...Typography.label,
+    color: Colors.textMuted,
+  },
+  statusValue: {
+    ...Typography.bodyStrong,
+    color: Colors.white,
+    marginTop: Spacing.xxs,
+  },
+  statusProgress: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: Spacing.xxs,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  metricCard: {
+    flexGrow: 1,
+    minWidth: 170,
+  },
+  metricValue: {
+    ...Typography.metric,
+    color: Colors.white,
+    marginTop: Spacing.md,
+  },
+  metricLabel: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: Spacing.xxs,
+  },
+  workspaceGrid: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: Spacing.lg,
+  },
+  workspaceGridCompact: {
+    flexDirection: 'column',
+  },
+  mainColumn: {
+    flex: 1.7,
+    gap: Spacing.lg,
+    minWidth: 0,
+  },
+  sideColumn: {
+    flex: 1,
+    gap: Spacing.lg,
+    minWidth: 300,
+  },
+  detailGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
+  },
+  detail: {
+    alignItems: 'flex-start',
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexGrow: 1,
+    gap: Spacing.sm,
+    minWidth: 220,
+    padding: Spacing.md,
+  },
+  detailContent: {
+    flex: 1,
+  },
+  detailLabel: {
+    ...Typography.label,
+    color: Colors.textMuted,
+  },
+  detailValue: {
+    ...Typography.bodyStrong,
+    color: Colors.text,
+    marginTop: Spacing.xxs,
+  },
+  notesBlock: {
+    borderTopColor: Colors.border,
+    borderTopWidth: 1,
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.lg,
+  },
+  notesLabel: {
+    ...Typography.label,
+    color: Colors.textMuted,
+  },
+  notesText: {
+    ...Typography.body,
+    color: Colors.text,
+    marginTop: Spacing.xs,
+  },
+  checklist: {
+    gap: Spacing.sm,
+  },
+  requirementRow: {
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: Spacing.md,
+    padding: Spacing.md,
+  },
+  requirementRowPressed: {
+    opacity: 0.82,
+  },
+  requirementOrder: {
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.pill,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  requirementOrderText: {
+    ...Typography.caption,
+    color: Colors.silver,
+    fontWeight: '800',
+  },
+  requirementContent: {
+    flex: 1,
+  },
+  requirementTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  requirementTitle: {
+    ...Typography.bodyStrong,
+    color: Colors.white,
+  },
+  requirementType: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+  },
+  requiredText: {
+    color: Colors.primary,
+  },
+  requirementDetail: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: Spacing.xxs,
+  },
+  requirementState: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  requirementStateText: {
+    ...Typography.caption,
+    fontWeight: '800',
+  },
+  actionStack: {
+    gap: Spacing.sm,
+  },
+  workspaceAction: {
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: Spacing.md,
+    padding: Spacing.md,
+  },
+  workspaceActionPressed: {
+    opacity: 0.82,
+  },
+  workspaceActionIcon: {
+    alignItems: 'center',
+    backgroundColor: Colors.primarySoft,
+    borderRadius: Radius.md,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  workspaceActionContent: {
+    flex: 1,
+  },
+  workspaceActionTitle: {
+    ...Typography.bodyStrong,
+    color: Colors.white,
+  },
+  workspaceActionText: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: Spacing.xxs,
+  },
+  decisionBox: {
+    alignItems: 'center',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    padding: Spacing.lg,
+  },
+  decisionTitle: {
+    ...Typography.cardTitle,
+    marginTop: Spacing.sm,
+  },
+  decisionText: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+    textAlign: 'center',
+  },
+  decisionButton: {
+    marginTop: Spacing.md,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xxl,
+  },
+  emptyTitle: {
+    ...Typography.cardTitle,
+    color: Colors.white,
+    marginTop: Spacing.md,
+  },
+  emptyText: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+    maxWidth: 520,
+    textAlign: 'center',
+  },
 });
