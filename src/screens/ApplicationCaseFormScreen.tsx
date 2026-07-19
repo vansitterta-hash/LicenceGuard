@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +15,8 @@ import {
   ChevronRight,
   ClipboardCheck,
   FileText,
+  FolderOpen,
+  Plus,
   Save,
   ShieldCheck,
   Target,
@@ -161,54 +163,67 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     }
   }, [stepIndex, steps.length]);
 
-  useEffect(() => {
-    const loadData = async () => {
+  const loadData = useCallback(async (showLoading = true) => {
+    if (showLoading) {
       setLoading(true);
-      try {
-        const [client, competencies, firearms] = await Promise.all([
-          getClient(route.params.clientId),
-          listClientCompetencies(route.params.clientId),
-          listClientFirearms(route.params.clientId),
-        ]);
-        setData({ client, competencies, firearms });
+    }
 
-        if (route.params.applicationCaseId) {
-          const item = await getApplicationCase(route.params.applicationCaseId);
-          setValues({
-            applicationType: item.application_type,
-            status: item.status,
-            competencyCategory: item.competency_category ?? 'HANDGUN',
-            competencyId: item.competency_id ?? '',
-            firearmId: item.firearm_id ?? '',
-            firearmLicenceId: item.firearm_licence_id ?? '',
-            licenceSection: item.licence_section ?? '',
-            acquisitionSource: item.acquisition_source ?? 'NOT_APPLICABLE',
-            supplierName: item.supplier_name ?? '',
-            supplierIdOrRegistration: item.supplier_id_or_registration ?? '',
-            supplierContact: item.supplier_contact ?? '',
-            supplierLicenceNumber: item.supplier_licence_number ?? '',
-            saleOrInvoiceReference: item.sale_or_invoice_reference ?? '',
-            motivationSummary: item.motivation_summary ?? '',
-            openedDate: item.opened_date,
-            targetSubmissionDate: item.target_submission_date ?? '',
-            actualSubmissionDate: item.actual_submission_date ?? '',
-            applicationReference: item.application_reference ?? '',
-            policeStation: item.police_station ?? '',
-            outcomeDate: item.outcome_date ?? '',
-            outcomeNotes: item.outcome_notes ?? '',
-            progressPercent: String(item.progress_percent),
-            dealerNotes: item.dealer_notes ?? '',
-            clientNotes: item.client_notes ?? '',
-          });
-        }
-      } catch (error) {
-        Alert.alert('Unable to load application case', error instanceof Error ? error.message : 'An unknown error occurred.');
-      } finally {
+    try {
+      const [client, competencies, firearms] = await Promise.all([
+        getClient(route.params.clientId),
+        listClientCompetencies(route.params.clientId),
+        listClientFirearms(route.params.clientId),
+      ]);
+
+      setData({ client, competencies, firearms });
+
+      if (route.params.applicationCaseId) {
+        const item = await getApplicationCase(route.params.applicationCaseId);
+        setValues({
+          applicationType: item.application_type,
+          status: item.status,
+          competencyCategory: item.competency_category ?? 'HANDGUN',
+          competencyId: item.competency_id ?? '',
+          firearmId: item.firearm_id ?? '',
+          firearmLicenceId: item.firearm_licence_id ?? '',
+          licenceSection: item.licence_section ?? '',
+          acquisitionSource: item.acquisition_source ?? 'NOT_APPLICABLE',
+          supplierName: item.supplier_name ?? '',
+          supplierIdOrRegistration: item.supplier_id_or_registration ?? '',
+          supplierContact: item.supplier_contact ?? '',
+          supplierLicenceNumber: item.supplier_licence_number ?? '',
+          saleOrInvoiceReference: item.sale_or_invoice_reference ?? '',
+          motivationSummary: item.motivation_summary ?? '',
+          openedDate: item.opened_date,
+          targetSubmissionDate: item.target_submission_date ?? '',
+          actualSubmissionDate: item.actual_submission_date ?? '',
+          applicationReference: item.application_reference ?? '',
+          policeStation: item.police_station ?? '',
+          outcomeDate: item.outcome_date ?? '',
+          outcomeNotes: item.outcome_notes ?? '',
+          progressPercent: String(item.progress_percent),
+          dealerNotes: item.dealer_notes ?? '',
+          clientNotes: item.client_notes ?? '',
+        });
+      }
+    } catch (error) {
+      Alert.alert('Unable to load application case', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      if (showLoading) {
         setLoading(false);
       }
-    };
-    void loadData();
+    }
   }, [route.params.applicationCaseId, route.params.clientId]);
+
+  useEffect(() => {
+    void loadData();
+
+    const unsubscribe = navigation.addListener('focus', () => {
+      void loadData(false);
+    });
+
+    return unsubscribe;
+  }, [loadData, navigation]);
 
   const selectedFirearm = useMemo(
     () => data?.firearms.find((firearm) => firearm.id === values.firearmId) ?? null,
@@ -437,6 +452,29 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
                 })}
               </View>
             )}
+            <View style={styles.inlineActions}>
+              <Button
+                leftIcon={<Plus color={Colors.silver} size={18} />}
+                onPress={() => navigation.navigate('FirearmForm', { clientId: route.params.clientId })}
+                title="Add another firearm"
+                variant="secondary"
+              />
+              <Button
+                leftIcon={<ShieldCheck color={Colors.silver} size={18} />}
+                onPress={() => navigation.navigate('CompetencyForm', {
+                  clientId: route.params.clientId,
+                  initialCategory: selectedFirearm?.required_competency ?? values.competencyCategory,
+                })}
+                title="Capture competency"
+                variant="secondary"
+              />
+              <Button
+                leftIcon={<FolderOpen color={Colors.silver} size={18} />}
+                onPress={() => navigation.navigate('DocumentLibrary', { clientId: route.params.clientId })}
+                title="Upload documents"
+                variant="secondary"
+              />
+            </View>
             {errors.firearmId ? <Text style={styles.error}>{errors.firearmId}</Text> : null}
           </Card>
         );
