@@ -2,7 +2,8 @@ import { supabase } from '../lib/supabase';
 import { getClientApplicationReadiness } from './applicationReadinessService';
 import { getApplicationCase } from './applicationCaseService';
 import { getClient } from './clientService';
-import { listClientDocuments } from './documentService';
+import { createDocumentSignedUrl, listClientDocuments } from './documentService';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   getApplicationCaseTypeLabel,
   type ApplicationCaseStatus,
@@ -18,6 +19,7 @@ import type {
   ApplicationPackItemState,
   ApplicationPackManifest,
   PrepareApplicationPackResult,
+  ApplicationPackGenerationResult,
 } from '../types/applicationPack';
 
 const db = supabase as any;
@@ -421,4 +423,237 @@ export function printApplicationPackManifest(
   window.setTimeout(() => {
     printWindow.print();
   }, 250);
+}
+
+const DOCUMENT_BUCKET = 'licenceguard-documents';
+const A4_WIDTH = 595.28;
+const A4_HEIGHT = 841.89;
+
+function wrapText(text: string, maxLength = 88): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length > maxLength && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [''];
+}
+
+async function addCoverAndChecklist(
+  target: PDFDocument,
+  manifest: ApplicationPackManifest
+): Promise<void> {
+  const regular = await target.embedFont(StandardFonts.Helvetica);
+  const bold = await target.embedFont(StandardFonts.HelveticaBold);
+  const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
+  page.drawText('LicenceGuard', { x: 44, y: 780, size: 24, font: bold, color: rgb(0.55, 0, 0.04) });
+  page.drawText('APPLICATION PACK', { x: 44, y: 746, size: 18, font: bold });
+  page.drawText(manifest.applicationTypeLabel, { x: 44, y: 718, size: 13, font: bold });
+  const coverRows = [
+    ['Applicant', manifest.clientName],
+    ['ID number', manifest.clientIdNumber],
+    ['Subject', manifest.subject],
+    ['Licence section', manifest.licenceSection ? `Section ${manifest.licenceSection}` : 'Not applicable'],
+    ['Application case', manifest.applicationCaseId],
+    ['Generated', new Date().toLocaleString('en-ZA')],
+    ['Readiness', `${manifest.readinessScore}% — ${manifest.packState}`],
+  ];
+  let y = 672;
+  for (const [label, value] of coverRows) {
+    page.drawText(`${label}:`, { x: 44, y, size: 10, font: bold });
+    for (const line of wrapText(value, 72)) {
+      page.drawText(line, { x: 150, y, size: 10, font: regular });
+      y -= 14;
+    }
+    y -= 5;
+  }
+  page.drawText('This pack was assembled from generated and uploaded records stored in LicenceGuard.', {
+    x: 44, y: 82, size: 9, font: regular, color: rgb(0.3, 0.3, 0.3), maxWidth: 505,
+  });
+
+  const checklist = target.addPage([A4_WIDTH, A4_HEIGHT]);
+  checklist.drawText('APPLICATION PACK CHECKLIST', { x: 44, y: 790, size: 17, font: bold });
+  checklist.drawText(`${manifest.clientName} — ${manifest.subject}`, { x: 44, y: 766, size: 10, font: regular });
+  let cy = 732;
+  manifest.items.forEach((item) => {
+    if (cy < 74) {
+      cy = 790;
+      const continuation = target.addPage([A4_WIDTH, A4_HEIGHT]);
+      continuation.drawText('APPLICATION PACK CHECKLIST — CONTINUED', { x: 44, y: 812, size: 14, font: bold });
+      drawChecklistItem(continuation, item, cy, regular, bold);
+      cy -= 42;
+    } else {
+      drawChecklistItem(checklist, item, cy, regular, bold);
+      cy -= 42;
+    }
+  });
+}
+
+function drawChecklistItem(
+  page: any,
+  item: ApplicationPackItem,
+  y: number,
+  regular: any,
+  bold: any
+): void {
+  const state = item.state === 'COMPLETE' ? 'INCLUDED' : item.state;
+  page.drawRectangle({ x: 44, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.25, 0.25, 0.25) });
+  if (item.state === 'COMPLETE') page.drawText('X', { x: 46, y, size: 9, font: bold });
+  page.drawText(`${item.order}. ${item.label}`, { x: 68, y: y + 1, size: 10, font: bold, maxWidth: 420 });
+  page.drawText(`${item.required ? 'Required' : 'Recommended'} • ${state}`, { x: 68, y: y - 13, size: 8, font: regular, color: rgb(0.35, 0.35, 0.35) });
+  if (item.document) page.drawText(item.document.document_name, { x: 68, y: y - 25, size: 8, font: regular, maxWidth: 470 });
+}
+
+async function appendStoredDocument(
+  target: PDFDocument,
+  document: DocumentRecord
+): Promise<{ included: boolean; reason?: string }> {
+  const mime = (document.mime_type ?? '').toLowerCase();
+  const url = await createDocumentSignedUrl(document.storage_path);
+  const response = await fetch(url);
+  if (!response.ok) return { included: false, reason: `Download failed (${response.status}).` };
+  const bytes = new Uint8Array(await response.arrayBuffer());
+
+  try {
+    if (mime.includes('pdf') || document.file_name.toLowerCase().endsWith('.pdf')) {
+      const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const pages = await target.copyPages(source, source.getPageIndices());
+      pages.forEach((page) => target.addPage(page));
+      return { included: true };
+    }
+    if (mime.includes('png') || document.file_name.toLowerCase().endsWith('.png')) {
+      const image = await target.embedPng(bytes);
+      const scale = Math.min((A4_WIDTH - 60) / image.width, (A4_HEIGHT - 60) / image.height, 1);
+      const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
+      page.drawImage(image, { x: (A4_WIDTH - image.width * scale) / 2, y: (A4_HEIGHT - image.height * scale) / 2, width: image.width * scale, height: image.height * scale });
+      return { included: true };
+    }
+    if (mime.includes('jpeg') || mime.includes('jpg') || /\.(jpe?g)$/i.test(document.file_name)) {
+      const image = await target.embedJpg(bytes);
+      const scale = Math.min((A4_WIDTH - 60) / image.width, (A4_HEIGHT - 60) / image.height, 1);
+      const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
+      page.drawImage(image, { x: (A4_WIDTH - image.width * scale) / 2, y: (A4_HEIGHT - image.height * scale) / 2, width: image.width * scale, height: image.height * scale });
+      return { included: true };
+    }
+    return { included: false, reason: 'Only PDF, JPG and PNG files can be merged into the printable PDF pack.' };
+  } catch (error) {
+    return { included: false, reason: error instanceof Error ? error.message : 'The document could not be merged.' };
+  }
+}
+
+export async function generateAndArchiveApplicationPack(input: {
+  dealerId: string;
+  userId: string;
+  clientId: string;
+  applicationCaseId: string;
+}): Promise<ApplicationPackGenerationResult> {
+  const manifest = await buildApplicationPackManifest(input.clientId, input.applicationCaseId);
+  if (manifest.packState !== 'READY') {
+    throw new Error(`The final application pack cannot be generated yet. ${manifest.blockingReasons.join(' ') || 'Resolve verification warnings first.'}`);
+  }
+
+  const pdf = await PDFDocument.create();
+  await addCoverAndChecklist(pdf, manifest);
+  const includedDocumentIds: string[] = [];
+  const skippedDocuments: Array<{ documentId: string; name: string; reason: string }> = [];
+
+  for (const item of manifest.items.sort((a, b) => a.order - b.order)) {
+    if (!item.document) continue;
+    const result = await appendStoredDocument(pdf, item.document);
+    if (result.included) includedDocumentIds.push(item.document.id);
+    else skippedDocuments.push({ documentId: item.document.id, name: item.document.document_name, reason: result.reason ?? 'Unknown merge error.' });
+  }
+
+  const bytes = await pdf.save();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeSubject = manifest.subject.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/_+/g, '_').slice(0, 70) || 'application';
+  const fileName = `APPLICATION_PACK_${safeSubject}_${timestamp}.pdf`;
+  const storagePath = `${input.dealerId}/${input.clientId}/GENERATED_APPLICATION_PACKS/${fileName}`;
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+
+  const upload = await db.storage.from(DOCUMENT_BUCKET).upload(storagePath, blob, { contentType: 'application/pdf', upsert: false });
+  if (upload.error) throw new Error(upload.error.message);
+
+  const inserted = await db.from('documents').insert({
+    dealer_id: input.dealerId,
+    client_id: input.clientId,
+    competency_id: null,
+    firearm_id: null,
+    firearm_licence_id: null,
+    application_case_id: input.applicationCaseId,
+    parent_document_id: null,
+    document_type: 'SUPPORTING_DOCUMENT',
+    document_scope: 'APPLICATION_CASE',
+    lifecycle_status: 'ACTIVE',
+    document_name: `${manifest.applicationTypeLabel} — complete application pack`,
+    document_date: new Date().toISOString().slice(0, 10),
+    expiry_date: null,
+    issued_by: 'LicenceGuard Application Pack Engine',
+    reference_number: null,
+    version_number: 1,
+    storage_path: storagePath,
+    file_name: fileName,
+    original_file_name: fileName,
+    mime_type: 'application/pdf',
+    file_size_bytes: blob.size,
+    is_verified: true,
+    is_generated: true,
+    generated_from_template_id: null,
+    notes: skippedDocuments.length ? `Final pack generated. ${skippedDocuments.length} incompatible document(s) were not merged; see metadata.` : 'Final ordered printable application pack generated by LicenceGuard.',
+    metadata: {
+      category: 'APPLICATION_PACK',
+      packState: manifest.packState,
+      readinessScore: manifest.readinessScore,
+      manifest,
+      includedDocumentIds,
+      skippedDocuments,
+      renderer: 'LICENCEGUARD_APPLICATION_PACK_V1',
+    },
+    created_by: input.userId,
+    updated_by: input.userId,
+  }).select('*').single();
+
+  if (inserted.error) {
+    await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
+    throw new Error(inserted.error.message);
+  }
+
+  const statusUpdate = await db.from('application_cases').update({
+    status: 'READY_FOR_SUBMISSION',
+    progress_percent: 90,
+    updated_by: input.userId,
+    updated_at: new Date().toISOString(),
+  }).eq('id', input.applicationCaseId).eq('client_id', input.clientId).eq('dealer_id', input.dealerId);
+  if (statusUpdate.error) throw new Error(statusUpdate.error.message);
+
+  return {
+    document: inserted.data as DocumentRecord,
+    manifest: { ...manifest, caseStatus: 'READY_FOR_SUBMISSION' },
+    includedDocumentIds,
+    skippedDocuments,
+    fileName,
+    bytes,
+  };
+}
+
+export function downloadGeneratedApplicationPack(bytes: Uint8Array, fileName: string): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw new Error('Downloading the application pack is currently available on LicenceGuard Web.');
+  }
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }

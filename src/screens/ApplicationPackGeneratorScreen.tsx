@@ -33,6 +33,8 @@ import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import {
   buildApplicationPackManifest,
+  downloadGeneratedApplicationPack,
+  generateAndArchiveApplicationPack,
   prepareApplicationPack,
   printApplicationPackManifest,
 } from '../services/applicationPackService';
@@ -61,6 +63,7 @@ export default function ApplicationPackGeneratorScreen({
     useState<ApplicationPackManifest | null>(null);
   const [loading, setLoading] = useState(true);
   const [preparing, setPreparing] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const compact = width < 820;
 
@@ -152,6 +155,50 @@ export default function ApplicationPackGeneratorScreen({
       );
     } finally {
       setPreparing(false);
+    }
+  };
+
+  const generateFinalPack = async () => {
+    if (!manifest || !dealerProfile?.dealerId || !user?.id) {
+      return;
+    }
+
+    if (manifest.packState !== 'READY') {
+      Alert.alert(
+        'Application pack not ready',
+        'Resolve all missing, expired and unverified required documents before generating the final printable pack.'
+      );
+      return;
+    }
+
+    setGenerating(true);
+
+    try {
+      const result = await generateAndArchiveApplicationPack({
+        dealerId: dealerProfile.dealerId,
+        userId: user.id,
+        clientId: route.params.clientId,
+        applicationCaseId: route.params.applicationCaseId,
+      });
+
+      setManifest(result.manifest);
+      downloadGeneratedApplicationPack(result.bytes, result.fileName);
+
+      Alert.alert(
+        'Application pack generated',
+        result.skippedDocuments.length > 0
+          ? `The printable PDF pack was archived and downloaded. ${result.skippedDocuments.length} incompatible document(s) could not be merged; the details are stored in the archived pack metadata.`
+          : 'The ordered printable PDF pack was archived against the application case and downloaded.'
+      );
+    } catch (error) {
+      Alert.alert(
+        'Unable to generate application pack',
+        error instanceof Error
+          ? error.message
+          : 'An unknown error occurred.'
+      );
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -298,8 +345,20 @@ export default function ApplicationPackGeneratorScreen({
 
           <View style={styles.engineActions}>
             <Button
+              disabled={manifest.packState !== 'READY'}
               leftIcon={
                 <FileOutput
+                  color={Colors.white}
+                  size={18}
+                />
+              }
+              loading={generating}
+              onPress={() => void generateFinalPack()}
+              title="Generate final PDF pack"
+            />
+            <Button
+              leftIcon={
+                <ClipboardCheck
                   color={Colors.white}
                   size={18}
                 />
@@ -308,9 +367,10 @@ export default function ApplicationPackGeneratorScreen({
               onPress={() => void prepare()}
               title={
                 manifest.packState === 'READY'
-                  ? 'Finalise pack'
+                  ? 'Confirm readiness'
                   : 'Start pack preparation'
               }
+              variant="secondary"
             />
             <Button
               leftIcon={

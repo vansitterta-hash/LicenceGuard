@@ -51,3 +51,11 @@ export type PrepareApplicationPackResult = {
   manifest: ApplicationPackManifest;
   nextStatus: ApplicationCaseStatus;
 };
+export type ApplicationPackGenerationResult = {
+  document: DocumentRecord;
+  manifest: ApplicationPackManifest;
+  includedDocumentIds: string[];
+  skippedDocuments: Array<{ documentId: string; name: string; reason: string }>;
+  fileName: string;
+  bytes: Uint8Array;
+};
