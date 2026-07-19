@@ -2,6 +2,8 @@ import { supabase } from '../lib/supabase';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import type { DocumentRecord, DocumentType } from '../types/document';
 import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
+import { getSapsTemplate } from '../data/sapsTemplateRegistry';
+import { renderOfficialPdfTemplate } from '../engines/pdfTemplateRenderer';
 
 const DOCUMENT_BUCKET = 'licenceguard-documents';
 const db = supabase as any;
@@ -172,6 +174,80 @@ export async function archiveCompletedApplication(input: {
       mappedDocument: mapApplicationToSapsTemplate(input.data, input.values),
       applicationType: input.data.application.applicationType,
       reviewValues: input.values,
+    },
+    created_by: input.userId,
+    updated_by: input.userId,
+  }).select('*').single();
+
+  if (inserted.error) {
+    await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
+    throw new Error(inserted.error.message);
+  }
+  return inserted.data as DocumentRecord;
+}
+
+
+export async function generateOfficialApplicationPdf(
+  data: ApplicationAutofillPackage,
+  values: ApplicationReviewValues
+): Promise<Uint8Array> {
+  const template = getSapsTemplate(data.application.formCode);
+  return renderOfficialPdfTemplate({ template: template as never, context: { data, reviewValues: values } });
+}
+
+export async function archiveOfficialApplicationPdf(input: {
+  dealerId: string;
+  clientId: string;
+  userId: string;
+  data: ApplicationAutofillPackage;
+  values: ApplicationReviewValues;
+}): Promise<DocumentRecord> {
+  const bytes = await generateOfficialApplicationPdf(input.data, input.values);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = `${input.data.application.formCode}_${timestamp}.pdf`;
+  const storagePath = `${input.dealerId}/${input.clientId}/GENERATED_APPLICATIONS/${fileName}`;
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+
+  const upload = await db.storage.from(DOCUMENT_BUCKET).upload(storagePath, blob, {
+    contentType: 'application/pdf',
+    upsert: false,
+  });
+  if (upload.error) throw new Error(upload.error.message);
+
+  const mappedDocument = mapApplicationToSapsTemplate(input.data, input.values);
+  const inserted = await db.from('documents').insert({
+    dealer_id: input.dealerId,
+    client_id: input.clientId,
+    competency_id: null,
+    firearm_id: null,
+    firearm_licence_id: null,
+    application_case_id: input.data.application.applicationCaseId,
+    parent_document_id: null,
+    document_type: documentTypeFor(input.data),
+    document_scope: 'APPLICATION_CASE',
+    lifecycle_status: 'ACTIVE',
+    document_name: `${input.data.application.formLabel} - completed official PDF`,
+    document_date: new Date().toISOString().slice(0, 10),
+    expiry_date: null,
+    issued_by: 'LicenceGuard Document Engine',
+    reference_number: input.values.applicationReference.trim() || null,
+    version_number: 1,
+    storage_path: storagePath,
+    file_name: fileName,
+    original_file_name: fileName,
+    mime_type: 'application/pdf',
+    file_size_bytes: blob.size,
+    is_verified: false,
+    is_generated: true,
+    generated_from_template_id: null,
+    notes: `Generated onto the official ${input.data.application.formCode} template. Review every field before signature and submission.`,
+    metadata: {
+      formCode: input.data.application.formCode,
+      templateSourceUrl: mappedDocument.template.sourceUrl,
+      mappedDocument,
+      applicationType: input.data.application.applicationType,
+      reviewValues: input.values,
+      renderer: 'LICENCEGUARD_PDF_OVERLAY_V1',
     },
     created_by: input.userId,
     updated_by: input.userId,

@@ -11,7 +11,9 @@ import { useAuth } from '../context/AuthContext';
 import { buildApplicationAutofillPackage } from '../services/applicationAutofillService';
 import {
   archiveCompletedApplication,
+  archiveOfficialApplicationPdf,
   buildCompletedApplicationHtml,
+  generateOfficialApplicationPdf,
   createReviewValues,
   printCompletedApplication,
   type ApplicationReviewValues,
@@ -22,6 +24,7 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
+import { downloadPdf } from '../engines/pdfTemplateRenderer';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationAutofill'>;
@@ -33,6 +36,7 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   const [values, setValues] = useState<ApplicationReviewValues | null>(null);
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,18 +72,31 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     }
   };
 
+  const generatePdf = async () => {
+    if (!data || !values) return;
+    setGeneratingPdf(true);
+    try {
+      const bytes = await generateOfficialApplicationPdf(data, values);
+      downloadPdf(bytes, `${data.application.formCode}_${values.surname || 'application'}.pdf`);
+    } catch (error) {
+      Alert.alert('Unable to generate official PDF', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   const archive = async () => {
     if (!data || !values || !dealerProfile || !user) return;
     setArchiving(true);
     try {
-      await archiveCompletedApplication({
+      await archiveOfficialApplicationPdf({
         dealerId: dealerProfile.dealerId,
         clientId: route.params.clientId,
         userId: user.id,
         data,
         values,
       });
-      Alert.alert('Application archived', 'The completed review copy has been saved against this application case. The original template remains unchanged.');
+      Alert.alert('Official PDF archived', 'The completed official PDF has been saved against this application case. The blank SAPS template remains unchanged and reusable.');
     } catch (error) {
       Alert.alert('Unable to archive application', error instanceof Error ? error.message : 'An unknown error occurred.');
     } finally {
@@ -112,8 +129,9 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
             <Text style={styles.muted}>{data.canGenerate ? 'Review and correct the mapped fields below, then print and archive the completed copy.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
           </View>
           <View style={styles.actions}>
-            <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} onPress={print} title="Print / Save PDF" />
-            <Button disabled={!canFinalise || !dealerProfile || !user} leftIcon={<Archive color={Colors.silver} size={18} />} loading={archiving} onPress={() => void archive()} title="Archive completed copy" variant="secondary" />
+            <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} loading={generatingPdf} onPress={() => void generatePdf()} title="Generate official PDF" />
+            <Button disabled={!canFinalise} onPress={print} title="Print review sheet" variant="secondary" />
+            <Button disabled={!canFinalise || !dealerProfile || !user} leftIcon={<Archive color={Colors.silver} size={18} />} loading={archiving} onPress={() => void archive()} title="Archive official PDF" variant="secondary" />
           </View>
         </View>
       </Card>
