@@ -1,12 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { CheckCircle2, FileOutput, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
+import { Archive, CheckCircle2, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
 
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Screen from '../components/Screen';
-import { buildApplicationAutofillPackage, printApplicationAutofillPackage } from '../services/applicationAutofillService';
+import TextField from '../components/TextField';
+import { useAuth } from '../context/AuthContext';
+import { buildApplicationAutofillPackage } from '../services/applicationAutofillService';
+import {
+  archiveCompletedApplication,
+  buildCompletedApplicationHtml,
+  createReviewValues,
+  printCompletedApplication,
+  type ApplicationReviewValues,
+} from '../services/generatedApplicationDocumentService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
@@ -15,15 +24,21 @@ import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationAutofill'>;
+type ReviewKey = keyof ApplicationReviewValues;
 
 export default function ApplicationAutofillScreen({ navigation, route }: Props) {
+  const { dealerProfile, user } = useAuth();
   const [data, setData] = useState<ApplicationAutofillPackage | null>(null);
+  const [values, setValues] = useState<ApplicationReviewValues | null>(null);
   const [loading, setLoading] = useState(true);
+  const [archiving, setArchiving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await buildApplicationAutofillPackage(route.params.clientId, route.params.applicationCaseId));
+      const next = await buildApplicationAutofillPackage(route.params.clientId, route.params.applicationCaseId);
+      setData(next);
+      setValues(createReviewValues(next));
     } catch (error) {
       Alert.alert('Unable to build AutoFill data', error instanceof Error ? error.message : 'An unknown error occurred.');
     } finally {
@@ -36,16 +51,41 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     return navigation.addListener('focus', () => void load());
   }, [load, navigation]);
 
+  const setField = (key: ReviewKey, value: string) => {
+    setValues((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const canFinalise = useMemo(() => Boolean(data?.canGenerate && values), [data, values]);
+
   const print = () => {
-    if (!data) return;
+    if (!data || !values) return;
     try {
-      printApplicationAutofillPackage(data);
+      printCompletedApplication(buildCompletedApplicationHtml(data, values));
     } catch (error) {
-      Alert.alert('Unable to generate form worksheet', error instanceof Error ? error.message : 'An unknown error occurred.');
+      Alert.alert('Unable to print completed application', error instanceof Error ? error.message : 'An unknown error occurred.');
     }
   };
 
-  if (loading || !data) {
+  const archive = async () => {
+    if (!data || !values || !dealerProfile || !user) return;
+    setArchiving(true);
+    try {
+      await archiveCompletedApplication({
+        dealerId: dealerProfile.dealerId,
+        clientId: route.params.clientId,
+        userId: user.id,
+        data,
+        values,
+      });
+      Alert.alert('Application archived', 'The completed review copy has been saved against this application case. The original template remains unchanged.');
+    } catch (error) {
+      Alert.alert('Unable to archive application', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  if (loading || !data || !values) {
     return <Screen scroll={false}><View style={styles.loading}><ActivityIndicator color={Colors.primary} size="large" /><Text style={styles.muted}>Mapping application data...</Text></View></Screen>;
   }
 
@@ -53,58 +93,55 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     <Screen maxWidth={1080}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.eyebrow}>APPLICATION AUTOFILL ENGINE</Text>
+          <Text style={styles.eyebrow}>SAPS DOCUMENT AUTO-COMPLETION</Text>
           <Text style={styles.title}>{data.application.formLabel}</Text>
           <Text style={styles.muted}>{data.applicant.fullName} • {data.application.applicationTypeLabel}</Text>
         </View>
-        <Button leftIcon={<RefreshCw color={Colors.silver} size={18} />} onPress={() => void load()} title="Rebuild" variant="secondary" />
+        <Button leftIcon={<RefreshCw color={Colors.silver} size={18} />} onPress={() => void load()} title="Reload captured data" variant="secondary" />
       </View>
 
       <Card padding="large" style={[styles.statusCard, { borderColor: data.canGenerate ? Colors.success : Colors.danger }]}>
         <View style={styles.statusRow}>
           {data.canGenerate ? <CheckCircle2 color={Colors.success} size={34} /> : <TriangleAlert color={Colors.danger} size={34} />}
           <View style={styles.statusText}>
-            <Text style={[styles.statusTitle, { color: data.canGenerate ? Colors.success : Colors.danger }]}>{data.canGenerate ? 'AutoFill ready' : 'AutoFill blocked'}</Text>
-            <Text style={styles.muted}>{data.canGenerate ? 'All mandatory mapped fields are present. Generate the printable checking worksheet.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
+            <Text style={[styles.statusTitle, { color: data.canGenerate ? Colors.success : Colors.danger }]}>{data.canGenerate ? 'Review copy ready' : 'Auto-completion blocked'}</Text>
+            <Text style={styles.muted}>{data.canGenerate ? 'Review and correct the mapped fields below, then print and archive the completed copy.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
           </View>
-          <Button disabled={!data.canGenerate} leftIcon={<Printer color={Colors.white} size={18} />} onPress={print} title="Generate form worksheet" />
+          <View style={styles.actions}>
+            <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} onPress={print} title="Print / Save PDF" />
+            <Button disabled={!canFinalise || !dealerProfile || !user} leftIcon={<Archive color={Colors.silver} size={18} />} loading={archiving} onPress={() => void archive()} title="Archive completed copy" variant="secondary" />
+          </View>
         </View>
       </Card>
 
-      {data.issues.length > 0 ? (
-        <Card subtitle="Blocking items must be resolved. Warnings should be checked before signature." title="Validation results">
-          <View style={styles.issueList}>{data.issues.map((issue) => (
-            <View key={issue.key} style={[styles.issue, { borderColor: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }]}>
-              <TriangleAlert color={issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning} size={18} />
-              <View style={styles.issueText}><Text style={styles.issueLabel}>{issue.label}</Text><Text style={styles.muted}>{issue.message}</Text></View>
-              <Text style={{ color: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }}>{issue.severity}</Text>
-            </View>
-          ))}</View>
-          <Button leftIcon={<FileOutput color={Colors.white} size={18} />} onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: route.params.clientId, applicationCaseId: route.params.applicationCaseId })} style={styles.editButton} title="Edit application data" />
-        </Card>
-      ) : null}
+      {data.issues.length > 0 ? <Card subtitle="Blocking items must be corrected in the source record. Warnings should be checked before finalisation." title="Validation results"><View style={styles.issueList}>{data.issues.map((issue) => <View key={issue.key} style={[styles.issue, { borderColor: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }]}><TriangleAlert color={issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning} size={18} /><View style={styles.issueText}><Text style={styles.issueLabel}>{issue.label}</Text><Text style={styles.muted}>{issue.message}</Text></View><Text style={{ color: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }}>{issue.severity}</Text></View>)}</View><Button onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: route.params.clientId, applicationCaseId: route.params.applicationCaseId })} style={styles.editButton} title="Edit source application data" /></Card> : null}
 
-      <DataSection title="Applicant" rows={[
-        ['Full name', data.applicant.fullName], ['ID number', data.applicant.idNumber], ['Cellphone', data.applicant.cellphone], ['Email', data.applicant.email], ['Address', [data.applicant.residentialAddress, data.applicant.suburb, data.applicant.city, data.applicant.province, data.applicant.postalCode].filter(Boolean).join(', ')],
-      ]} />
-
-      {data.firearm ? <DataSection title="Firearm and licence" rows={[
-        ['Firearm', [data.firearm.make, data.firearm.model].filter(Boolean).join(' ')], ['Calibre', data.firearm.calibre], ['Serial number', data.firearm.serialNumber], ['Licence section', data.firearm.licenceSection], ['Existing licence', data.firearm.licenceNumber], ['Expiry date', data.firearm.licenceExpiryDate],
-      ]} /> : null}
-
-      {data.competency ? <DataSection title="Competency" rows={[
-        ['Category', data.competency.category ?? ''], ['Certificate number', data.competency.certificateNumber], ['Issue date', data.competency.issueDate], ['Expiry date', data.competency.expiryDate],
-      ]} /> : null}
-
-      {data.supplier ? <DataSection title="Supplier or seller" rows={[
-        ['Source', data.supplier.acquisitionSource], ['Name', data.supplier.name], ['ID / registration', data.supplier.idOrRegistration], ['Contact', data.supplier.contact], ['Dealer licence', data.supplier.dealerLicenceNumber], ['Sale / invoice reference', data.supplier.saleOrInvoiceReference],
-      ]} /> : null}
+      <EditSection title="Application" fields={[
+        ['Police station / DFO', 'policeStation'], ['Application reference', 'applicationReference'], ['Motivation summary', 'motivationSummary', true],
+      ]} values={values} setField={setField} />
+      <EditSection title="Applicant" fields={[
+        ['First names', 'firstName'], ['Surname', 'surname'], ['ID number', 'idNumber'], ['Cellphone', 'cellphone'], ['Alternate cellphone', 'alternateCellphone'], ['Email', 'email'], ['Residential address', 'residentialAddress'], ['Suburb', 'suburb'], ['Town / city', 'city'], ['Province', 'province'], ['Postal code', 'postalCode'],
+      ]} values={values} setField={setField} />
+      {data.firearm ? <EditSection title="Firearm and licence" fields={[
+        ['Make', 'firearmMake'], ['Model', 'firearmModel'], ['Calibre', 'calibre'], ['Serial number', 'serialNumber'], ['Licence section', 'licenceSection'], ['Existing licence number', 'licenceNumber'],
+      ]} values={values} setField={setField} /> : null}
+      {data.competency ? <EditSection title="Competency" fields={[
+        ['Category', 'competencyCategory'], ['Certificate number', 'competencyCertificateNumber'],
+      ]} values={values} setField={setField} /> : null}
+      {data.supplier ? <EditSection title="Dealer or private seller" fields={[
+        ['Name', 'supplierName'], ['ID / registration', 'supplierIdOrRegistration'], ['Contact', 'supplierContact'], ['Dealer / seller licence number', 'supplierLicenceNumber'], ['Sale / invoice reference', 'saleOrInvoiceReference'],
+      ]} values={values} setField={setField} /> : null}
     </Screen>
   );
 }
 
-function DataSection({ title, rows }: { title: string; rows: Array<[string, string]> }) {
-  return <Card title={title}><View style={styles.rows}>{rows.map(([label, value]) => <View key={label} style={styles.row}><Text style={styles.rowLabel}>{label}</Text><Text style={styles.rowValue}>{value || 'Not recorded'}</Text></View>)}</View></Card>;
+function EditSection({ title, fields, values, setField }: {
+  title: string;
+  fields: Array<[string, ReviewKey, boolean?]>;
+  values: ApplicationReviewValues;
+  setField: (key: ReviewKey, value: string) => void;
+}) {
+  return <Card title={title}><View style={styles.grid}>{fields.map(([label, key, multiline]) => <TextField key={key} containerStyle={multiline ? styles.fullWidth : styles.field} label={label} multiline={multiline} onChangeText={(value) => setField(key, value)} value={values[key]} />)}</View></Card>;
 }
 
 const styles = StyleSheet.create({
@@ -118,13 +155,13 @@ const styles = StyleSheet.create({
   statusRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg },
   statusText: { flex: 1, minWidth: 240 },
   statusTitle: { ...Typography.sectionTitle, marginBottom: Spacing.xs },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   issueList: { gap: Spacing.sm },
   issue: { alignItems: 'center', backgroundColor: Colors.surfaceRaised, borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: Spacing.md, padding: Spacing.md },
   issueText: { flex: 1 },
   issueLabel: { ...Typography.bodyStrong, color: Colors.white },
   editButton: { marginTop: Spacing.lg },
-  rows: { gap: Spacing.xs },
-  row: { borderBottomColor: Colors.border, borderBottomWidth: 1, flexDirection: 'row', gap: Spacing.lg, paddingVertical: Spacing.sm },
-  rowLabel: { ...Typography.bodyStrong, color: Colors.silver, width: 180 },
-  rowValue: { ...Typography.body, color: Colors.text, flex: 1 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg },
+  field: { flexBasis: 320, flexGrow: 1 },
+  fullWidth: { flexBasis: '100%' },
 });
