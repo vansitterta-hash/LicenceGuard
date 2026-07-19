@@ -88,6 +88,18 @@ const CONTACT_OPTIONS: Array<{
   },
 ];
 
+const PROVINCE_OPTIONS = [
+  'Eastern Cape',
+  'Free State',
+  'Gauteng',
+  'KwaZulu-Natal',
+  'Limpopo',
+  'Mpumalanga',
+  'North West',
+  'Northern Cape',
+  'Western Cape',
+] as const;
+
 export default function ClientFormScreen({
   navigation,
   route,
@@ -104,6 +116,8 @@ export default function ClientFormScreen({
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
   const [showContactOptions, setShowContactOptions] =
+    useState(false);
+  const [showProvinceOptions, setShowProvinceOptions] =
     useState(false);
   const [errors, setErrors] = useState<
     Partial<Record<keyof ClientFormValues, string>>
@@ -463,9 +477,10 @@ export default function ClientFormScreen({
 
           <Pressable
             accessibilityRole="button"
-            onPress={() =>
-              setShowContactOptions((current) => !current)
-            }
+            onPress={() => {
+              setShowProvinceOptions(false);
+              setShowContactOptions((current) => !current);
+            }}
             style={({ pressed }) => [
               styles.selector,
               pressed ? styles.selectorPressed : null,
@@ -575,14 +590,77 @@ export default function ClientFormScreen({
             value={form.city}
           />
 
-          <TextField
-            containerStyle={styles.field}
-            label="Province"
-            onChangeText={(value) =>
-              updateField('province', value)
-            }
-            value={form.province}
-          />
+          <View style={styles.field}>
+            <Text style={styles.selectorLabel}>
+              Province
+            </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setShowContactOptions(false);
+                setShowProvinceOptions(
+                  (current) => !current
+                );
+              }}
+              style={({ pressed }) => [
+                styles.selector,
+                pressed ? styles.selectorPressed : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.selectorValue,
+                  !form.province
+                    ? styles.selectorPlaceholder
+                    : null,
+                ]}
+              >
+                {form.province || 'Select province'}
+              </Text>
+
+              <ChevronDown
+                color={Colors.silver}
+                size={19}
+              />
+            </Pressable>
+
+            {showProvinceOptions ? (
+              <View style={styles.optionList}>
+                {PROVINCE_OPTIONS.map((province) => {
+                  const selected =
+                    province === form.province;
+
+                  return (
+                    <Pressable
+                      key={province}
+                      onPress={() => {
+                        updateField('province', province);
+                        setShowProvinceOptions(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.option,
+                        pressed
+                          ? styles.optionPressed
+                          : null,
+                      ]}
+                    >
+                      <Text style={styles.optionText}>
+                        {province}
+                      </Text>
+
+                      {selected ? (
+                        <Check
+                          color={Colors.success}
+                          size={18}
+                        />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
 
           <TextField
             containerStyle={styles.field}
@@ -803,6 +881,9 @@ const styles = StyleSheet.create({
   selectorValue: {
     ...Typography.bodyStrong,
     color: Colors.text,
+  },
+  selectorPlaceholder: {
+    color: Colors.textMuted,
   },
   optionList: {
     backgroundColor: Colors.surfaceRaised,
