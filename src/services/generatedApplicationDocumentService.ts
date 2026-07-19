@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import type { DocumentRecord, DocumentType } from '../types/document';
+import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
 
 const DOCUMENT_BUCKET = 'licenceguard-documents';
 const db = supabase as any;
@@ -84,34 +85,24 @@ export function buildCompletedApplicationHtml(
   data: ApplicationAutofillPackage,
   values: ApplicationReviewValues
 ): string {
-  const firearmRows = data.firearm
-    ? row('Make', values.firearmMake) + row('Model', values.firearmModel) + row('Calibre', values.calibre) + row('Serial number', values.serialNumber) + row('Firearm type', data.firearm.firearmType ?? '') + row('Licence section', values.licenceSection) + row('Existing licence number', values.licenceNumber)
-    : '';
+  const mapped = mapApplicationToSapsTemplate(data, values);
+  const mappedSections = mapped.sections.map((section) => {
+    const rows = section.fields.map((field) => row(field.label, field.value)).join('');
+    return `<h2>${escapeHtml(section.title)}</h2><table>${rows}</table>`;
+  }).join('');
 
-  const competencyRows = data.competency
-    ? row('Competency category', values.competencyCategory) + row('Certificate number', values.competencyCertificateNumber) + row('Issue date', data.competency.issueDate) + row('Expiry date', data.competency.expiryDate)
-    : '';
-
-  const supplierRows = data.supplier
-    ? row('Acquisition source', data.supplier.acquisitionSource) + row('Supplier / seller', values.supplierName) + row('ID / registration', values.supplierIdOrRegistration) + row('Contact', values.supplierContact) + row('Dealer / seller licence number', values.supplierLicenceNumber) + row('Sale / invoice reference', values.saleOrInvoiceReference)
-    : '';
-
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(data.application.formLabel)}</title><style>
-  @page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:12px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid #222;padding-bottom:4px}.meta{color:#555;margin-bottom:14px}.notice{border:1px solid #777;padding:10px;background:#f4f4f4;margin:12px 0}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #999;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eee}.signatures{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:28px}.signature{padding-top:30px;border-bottom:1px solid #111}.footer{margin-top:24px;font-size:10px;color:#666}@media print{.no-print{display:none}}
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(mapped.template.name)}</title><style>
+  @page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:12px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid #222;padding-bottom:4px}.meta{color:#555;margin-bottom:14px}.notice{border:1px solid #777;padding:10px;background:#f4f4f4;margin:12px 0}.source{border-left:4px solid #8b0000;padding:8px 10px;background:#fafafa;margin:12px 0}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #999;padding:7px;text-align:left;vertical-align:top}th{width:42%;background:#eee}.tick{font-weight:700;font-size:16px}.signatures{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:28px}.signature{padding-top:30px;border-bottom:1px solid #111}.footer{margin-top:24px;font-size:10px;color:#666}@media print{.no-print{display:none}}
   </style></head><body>
-  <h1>${escapeHtml(data.application.formLabel)}</h1>
-  <div class="meta">Form code: ${escapeHtml(data.application.formCode.replaceAll('_', ' '))} • LicenceGuard generated ${escapeHtml(new Date().toLocaleString('en-ZA'))}</div>
-  <div class="notice"><strong>Review copy:</strong> Confirm every entry against source documents and the current official SAPS form before signature and submission.</div>
-  <h2>Application details</h2><table>${row('Application type', data.application.applicationTypeLabel)}${row('Police station / DFO', values.policeStation)}${row('Application reference', values.applicationReference)}${row('Opened date', data.application.openedDate)}${row('Target submission date', data.application.targetSubmissionDate)}${row('Motivation summary', values.motivationSummary)}</table>
-  <h2>Applicant</h2><table>${row('First names', values.firstName)}${row('Surname', values.surname)}${row('Identity number', values.idNumber)}${row('Cellphone', values.cellphone)}${row('Alternate cellphone', values.alternateCellphone)}${row('Email', values.email)}${row('Residential address', values.residentialAddress)}${row('Suburb', values.suburb)}${row('Town / city', values.city)}${row('Province', values.province)}${row('Postal code', values.postalCode)}</table>
-  ${firearmRows ? `<h2>Firearm and licence</h2><table>${firearmRows}</table>` : ''}
-  ${competencyRows ? `<h2>Competency</h2><table>${competencyRows}</table>` : ''}
-  ${supplierRows ? `<h2>Dealer / private seller</h2><table>${supplierRows}</table>` : ''}
-  <div class="signatures"><div><div class="signature"></div><div>Applicant signature</div></div><div><div class="signature"></div><div>Date</div></div></div>
-  <div class="footer">LicenceGuard • Firearm Licence Renewal Management • Generated copy archived against application case ${escapeHtml(data.application.applicationCaseId)}</div>
+  <h1>${escapeHtml(mapped.template.name)}</h1>
+  <div class="meta">Template: ${escapeHtml(mapped.template.versionLabel)} | LicenceGuard generated ${escapeHtml(new Date().toLocaleString('en-ZA'))}</div>
+  <div class="source"><strong>Official blank form:</strong> ${escapeHtml(mapped.template.sourceUrl || 'Not available')}<br/><strong>Mapped:</strong> ${mapped.mappedFieldCount} fields | <strong>Missing required:</strong> ${mapped.missingRequiredFieldCount}</div>
+  <div class="notice"><strong>Completion schedule:</strong> This document contains the values mapped to the official SAPS form. Confirm every entry against source documents and transfer the reviewed values to the current official form before signature and submission.</div>
+  ${mappedSections}
+  <div class="signatures"><div><div class="signature"></div><div>Applicant review signature</div></div><div><div class="signature"></div><div>Date</div></div></div>
+  <div class="footer">LicenceGuard | Firearm Licence Renewal Management | Application case ${escapeHtml(data.application.applicationCaseId)} | Original SAPS template remains unchanged.</div>
   </body></html>`;
 }
-
 export function printCompletedApplication(html: string): void {
   if (typeof window === 'undefined') throw new Error('Printing is available on LicenceGuard Web.');
   const popup = window.open('', '_blank');
@@ -177,6 +168,8 @@ export async function archiveCompletedApplication(input: {
     notes: `Generated from ${input.data.application.formCode}. Review before signature and SAPS submission.`,
     metadata: {
       formCode: input.data.application.formCode,
+      templateSourceUrl: mapApplicationToSapsTemplate(input.data, input.values).template.sourceUrl,
+      mappedDocument: mapApplicationToSapsTemplate(input.data, input.values),
       applicationType: input.data.application.applicationType,
       reviewValues: input.values,
     },

@@ -196,10 +196,10 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const section = (applicationCase.licence_section ?? licence?.licence_section ?? '').replace(/[^0-9]/g, '');
     if (section === '16') {
       definitions.push(
-        { key: 'DEDICATED_STATUS', label: 'Dedicated status certificate', detail: 'Recommended supporting evidence for a Section 16 application.', documentType: 'DEDICATED_STATUS', required: false },
-        { key: 'GOOD_STANDING', label: 'Good-standing letter', detail: 'Recommended proof that the applicant remains in good standing.', documentType: 'GOOD_STANDING', required: false },
-        { key: 'MEMBERSHIP_CERTIFICATE', label: 'Membership certificate', detail: 'Recommended current membership evidence.', documentType: 'MEMBERSHIP_CERTIFICATE', required: false },
-        { key: 'ENDORSEMENT', label: 'Endorsement', detail: 'Recommended firearm-specific endorsement where available.', documentType: 'ENDORSEMENT', required: false },
+        { key: 'DEDICATED_STATUS', label: 'Dedicated status certificate', detail: 'Required proof of current dedicated status for a Section 16 application.', documentType: 'DEDICATED_STATUS', required: true },
+        { key: 'GOOD_STANDING', label: 'Good-standing letter', detail: 'Required current proof that the applicant remains in good standing.', documentType: 'GOOD_STANDING', required: true },
+        { key: 'MEMBERSHIP_CERTIFICATE', label: 'Membership certificate', detail: 'Required current membership evidence supporting dedicated status.', documentType: 'MEMBERSHIP_CERTIFICATE', required: true },
+        { key: 'ENDORSEMENT', label: 'Endorsement', detail: 'Required firearm-specific endorsement for the Section 16 application pack.', documentType: 'ENDORSEMENT', required: true },
         { key: 'SUPPORTING_RESEARCH', label: 'Firearm or calibre research', detail: 'Optional supporting research that strengthens the motivation.', documentType: 'SUPPORTING_RESEARCH', required: false },
       );
     }

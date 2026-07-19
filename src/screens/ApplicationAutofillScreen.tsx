@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Archive, CheckCircle2, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
 
@@ -21,6 +21,7 @@ import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
+import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationAutofill'>;
@@ -55,7 +56,8 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     setValues((current) => current ? { ...current, [key]: value } : current);
   };
 
-  const canFinalise = useMemo(() => Boolean(data?.canGenerate && values), [data, values]);
+  const mappedDocument = useMemo(() => data && values ? mapApplicationToSapsTemplate(data, values) : null, [data, values]);
+  const canFinalise = useMemo(() => Boolean(data?.canGenerate && values && mappedDocument?.missingRequiredFieldCount === 0), [data, mappedDocument, values]);
 
   const print = () => {
     if (!data || !values) return;
@@ -99,6 +101,8 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
         </View>
         <Button leftIcon={<RefreshCw color={Colors.silver} size={18} />} onPress={() => void load()} title="Reload captured data" variant="secondary" />
       </View>
+
+      {mappedDocument ? <Card subtitle={`${mappedDocument.mappedFieldCount} fields mapped • ${mappedDocument.missingRequiredFieldCount} required fields missing`} title="Official SAPS template"><View style={styles.templateRow}><View style={styles.templateText}><Text style={styles.templateName}>{mappedDocument.template.name}</Text><Text style={styles.muted}>{mappedDocument.template.sourceAuthority} • {mappedDocument.template.versionLabel}</Text></View><Button onPress={() => void Linking.openURL(mappedDocument.template.sourceUrl)} title="Open official blank form" variant="secondary" /></View></Card> : null}
 
       <Card padding="large" style={[styles.statusCard, { borderColor: data.canGenerate ? Colors.success : Colors.danger }]}>
         <View style={styles.statusRow}>
@@ -156,6 +160,9 @@ const styles = StyleSheet.create({
   statusText: { flex: 1, minWidth: 240 },
   statusTitle: { ...Typography.sectionTitle, marginBottom: Spacing.xs },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  templateRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.lg },
+  templateText: { flex: 1, minWidth: 260 },
+  templateName: { ...Typography.bodyStrong, color: Colors.white, marginBottom: Spacing.xs },
   issueList: { gap: Spacing.sm },
   issue: { alignItems: 'center', backgroundColor: Colors.surfaceRaised, borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: Spacing.md, padding: Spacing.md },
   issueText: { flex: 1 },
