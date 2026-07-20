@@ -440,6 +440,26 @@ function buildPayload(
         ? emptyToNull(values.licenceSection)
         : null,
 
+    acquisition_source: firearmApplication
+      ? values.acquisitionSource
+      : 'NOT_APPLICABLE',
+    supplier_name: firearmApplication
+      ? emptyToNull(values.supplierName)
+      : null,
+    supplier_id_or_registration: firearmApplication
+      ? emptyToNull(values.supplierIdOrRegistration)
+      : null,
+    supplier_contact: firearmApplication
+      ? emptyToNull(values.supplierContact)
+      : null,
+    supplier_licence_number: firearmApplication
+      ? emptyToNull(values.supplierLicenceNumber)
+      : null,
+    sale_or_invoice_reference: firearmApplication
+      ? emptyToNull(values.saleOrInvoiceReference)
+      : null,
+    motivation_summary: emptyToNull(values.motivationSummary),
+
     opened_date: values.openedDate.trim(),
 
     target_submission_date: emptyToNull(

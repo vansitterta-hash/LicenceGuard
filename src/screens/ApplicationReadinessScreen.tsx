@@ -25,10 +25,10 @@ import Card from '../components/Card';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import {
-  prepareSuggestedApplicationDocuments,
   suggestApplicationDocuments,
   type ApplicationDocumentSuggestion,
 } from '../services/applicationDocumentSuggestionService';
+import { orchestrateApplicationPack } from '../services/applicationOrchestratorService';
 import { getClientApplicationReadiness } from '../services/applicationReadinessService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
@@ -48,7 +48,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const [showCompleted, setShowCompleted] = useState(false);
   const [suggestionResult, setSuggestionResult] = useState<SuggestionResult | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [preparingSuggestions, setPreparingSuggestions] = useState(false);
+  const [compiling, setCompiling] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -99,37 +99,44 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     void loadSuggestions();
   }, [loadSuggestions]);
 
-  const prepareSuggestions = async () => {
-    if (!dealerProfile?.dealerId || !user?.id || !applicationCase || !suggestionResult) {
-      Alert.alert('Unable to prepare documents', 'The signed-in dealer or application context is missing.');
+  const compileApplicationPack = async () => {
+    if (!dealerProfile?.dealerId || !user?.id || !applicationCase) {
+      Alert.alert('Unable to compile application', 'The signed-in dealer or application context is missing.');
       return;
     }
 
-    setPreparingSuggestions(true);
+    setCompiling(true);
     try {
-      const added = await prepareSuggestedApplicationDocuments({
+      const result = await orchestrateApplicationPack({
         dealerId: dealerProfile.dealerId,
         userId: user.id,
         clientId: route.params.clientId,
         applicationCaseId: applicationCase.caseId,
-        suggestions: suggestionResult.suggestions,
-        context: suggestionResult.context,
       });
 
-      Alert.alert(
-        added > 0 ? 'Application documents prepared' : 'Documents already prepared',
-        added > 0
-          ? `${added} matched working ${added === 1 ? 'document has' : 'documents have'} been attached to this application. The original reference files remain unchanged.`
-          : 'The matched working documents are already attached to this application.'
-      );
+      if (result.packGenerated) {
+        Alert.alert(
+          'Application pack ready',
+          'LicenceGuard selected the matching documents, completed the SAPS form, assembled the pack, archived it and downloaded the printable PDF.'
+        );
+      } else {
+        Alert.alert(
+          'Application almost ready',
+          result.blockingReasons.length > 0
+            ? result.blockingReasons.join('\n\n')
+            : 'Complete the outstanding items shown below, then compile again.'
+        );
+      }
+
       await loadData();
+      await loadSuggestions();
     } catch (error) {
       Alert.alert(
-        'Unable to prepare documents',
+        'Unable to compile application',
         error instanceof Error ? error.message : 'An unknown error occurred.'
       );
     } finally {
-      setPreparingSuggestions(false);
+      setCompiling(false);
     }
   };
 
@@ -219,14 +226,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                 <SuggestionGroup title="Firearm and calibre information" items={informationSuggestions} />
               ) : null}
 
-              <Button
-                leftIcon={<Sparkles color={Colors.white} size={18} />}
-                title={preparingSuggestions ? 'Preparing documents...' : 'Prepare Suggested Documents'}
-                disabled={preparingSuggestions}
-                onPress={() => void prepareSuggestions()}
-              />
               <Text style={styles.helperText}>
-                Working copies are linked to this application with the current client, firearm, serial number, make, model, calibre, licence section and motivation context. Source documents remain unchanged.
+                LicenceGuard will use the strongest safe matches automatically when you compile. Working copies are linked to this application while the source documents remain unchanged.
               </Text>
             </View>
           ) : (
@@ -270,14 +271,11 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       <View style={styles.actions}>
         <Button
           leftIcon={<FileOutput color={Colors.white} size={19} />}
-          title="Compile Application Pack"
           size="large"
           fullWidth
-          disabled={!ready}
-          onPress={() => navigation.navigate('ApplicationPackGenerator', {
-            clientId: route.params.clientId,
-            applicationCaseId: applicationCase.caseId,
-          })}
+          disabled={compiling}
+          title={compiling ? 'Preparing Application...' : 'Compile Application Pack'}
+          onPress={() => void compileApplicationPack()}
         />
         <Button
           leftIcon={<Pencil color={Colors.silver} size={18} />}
