@@ -75,6 +75,40 @@ type WizardStep = {
   label: string;
 };
 
+type WorkflowAction = NonNullable<RootStackParamList['ApplicationCaseForm']['workflowAction']>;
+
+const WORKFLOW_ACTION_CONFIG: Record<WorkflowAction, {
+  applicationType: ApplicationCaseType;
+  title: string;
+  subtitle: string;
+}> = {
+  NEW_FIREARM_APPLICATION: {
+    applicationType: 'FIREARM_LICENCE_ADDITIONAL_APPLICATION',
+    title: 'New Firearm Application',
+    subtitle: 'Choose the firearm and purpose. LicenceGuard will prepare the application requirements.',
+  },
+  NEW_COMPETENCY: {
+    applicationType: 'COMPETENCY_FIRST_APPLICATION',
+    title: 'New Competency',
+    subtitle: 'Choose the competency category. LicenceGuard will prepare the required process.',
+  },
+  FURTHER_COMPETENCY: {
+    applicationType: 'COMPETENCY_ADDITIONAL_CATEGORY',
+    title: 'Further Competency',
+    subtitle: 'Choose the additional competency category required.',
+  },
+  FIREARM_RENEWAL: {
+    applicationType: 'FIREARM_LICENCE_RENEWAL',
+    title: 'Firearm Renewal',
+    subtitle: 'Choose the firearm being renewed. Existing licence information will be reused.',
+  },
+  COMPETENCY_RENEWAL: {
+    applicationType: 'COMPETENCY_RENEWAL',
+    title: 'Competency Renewal',
+    subtitle: 'Choose the competency category being renewed.',
+  },
+};
+
 const LICENCE_SECTIONS = [
   { value: '13', label: 'Section 13', description: 'Self-defence firearm licence.' },
   { value: '15', label: 'Section 15', description: 'Occasional hunting or sport shooting.' },
@@ -130,11 +164,30 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   const [stepIndex, setStepIndex] = useState(0);
 
   const isEditing = Boolean(route.params.applicationCaseId);
+  const workflowAction = route.params.workflowAction;
+  const workflowConfig = workflowAction ? WORKFLOW_ACTION_CONFIG[workflowAction] : null;
+  const simplifiedWorkflow = Boolean(workflowConfig) && !isEditing;
   const competencyApplication = isCompetencyApplicationType(values.applicationType);
   const firearmApplication = isFirearmApplicationType(values.applicationType);
   const newFirearmApplication = isNewFirearmLicenceApplication(values.applicationType);
 
   const steps = useMemo<WizardStep[]>(() => {
+    if (simplifiedWorkflow) {
+      if (competencyApplication) {
+        return [
+          { key: 'subject', label: 'Choose competency' },
+          { key: 'review', label: 'Confirm' },
+        ];
+      }
+
+      return [
+        { key: 'subject', label: 'Choose firearm' },
+        ...(newFirearmApplication ? [{ key: 'source', label: 'Purchase details' }] : []),
+        { key: 'purpose', label: 'Purpose' },
+        { key: 'review', label: 'Confirm' },
+      ];
+    }
+
     if (competencyApplication) {
       return [
         { key: 'type', label: 'Application' },
@@ -153,7 +206,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
       { key: 'tracking', label: 'Tracking' },
       { key: 'review', label: 'Review' },
     ];
-  }, [competencyApplication]);
+  }, [competencyApplication, newFirearmApplication, simplifiedWorkflow]);
 
   const currentStep = steps[Math.min(stepIndex, steps.length - 1)];
 
@@ -176,6 +229,30 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
       ]);
 
       setData({ client, competencies, firearms });
+
+      if (!route.params.applicationCaseId && workflowConfig) {
+        const applicationType = workflowAction === 'NEW_FIREARM_APPLICATION'
+          ? firearms.some((item) => Boolean(item.licence))
+            ? 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'
+            : 'FIREARM_LICENCE_FIRST_APPLICATION'
+          : workflowConfig.applicationType;
+        const competency = isCompetencyApplicationType(applicationType);
+        const firearm = isFirearmApplicationType(applicationType);
+        const isNew = isNewFirearmLicenceApplication(applicationType);
+
+        setValues((current) => ({
+          ...current,
+          applicationType,
+          acquisitionSource: competency
+            ? 'NOT_APPLICABLE'
+            : isNew
+              ? 'DEALER'
+              : 'EXISTING_FIREARM',
+          firearmId: firearm ? current.firearmId : '',
+          firearmLicenceId: firearm ? current.firearmLicenceId : '',
+          licenceSection: firearm ? current.licenceSection : '',
+        }));
+      }
 
       if (route.params.applicationCaseId) {
         const item = await getApplicationCase(route.params.applicationCaseId);
@@ -213,7 +290,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         setLoading(false);
       }
     }
-  }, [route.params.applicationCaseId, route.params.clientId]);
+  }, [route.params.applicationCaseId, route.params.clientId, workflowAction, workflowConfig]);
 
   useEffect(() => {
     void loadData();
@@ -228,6 +305,11 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   const selectedFirearm = useMemo(
     () => data?.firearms.find((firearm) => firearm.id === values.firearmId) ?? null,
     [data?.firearms, values.firearmId]
+  );
+
+  const selectedCompetency = useMemo(
+    () => data?.competencies.find((item) => item.id === values.competencyId) ?? null,
+    [data?.competencies, values.competencyId]
   );
 
   const selectedCompetencyLabel = useMemo(
@@ -403,22 +485,78 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
 
       case 'subject':
         if (competencyApplication) {
+          const renewalAction = workflowAction === 'COMPETENCY_RENEWAL';
+
           return (
-            <Card title="Choose the competency category" subtitle="Select the competency being applied for, renewed or regularised.">
-              <View style={styles.grid}>
-                {COMPETENCY_CATEGORIES.map((category) => {
-                  const selected = values.competencyCategory === category.value;
-                  return (
-                    <Pressable
-                      key={category.value}
-                      onPress={() => updateValue('competencyCategory', category.value)}
-                      style={({ pressed }) => [styles.option, selected && styles.selected, pressed && styles.pressed]}
-                    >
-                      <ShieldCheck color={selected ? Colors.white : Colors.primary} size={20} />
-                      <Text style={[styles.optionTitle, selected && styles.selectedText]}>{category.label}</Text>
-                    </Pressable>
-                  );
-                })}
+            <Card
+              title={renewalAction ? 'Choose the competency to renew' : 'Choose the competency category'}
+              subtitle={renewalAction
+                ? 'Select the existing competency record. LicenceGuard will reuse the captured certificate and dates.'
+                : 'Select the competency being applied for. Existing records remain available for review and editing.'}
+            >
+              {renewalAction && data.competencies.length > 0 ? (
+                <View style={styles.grid}>
+                  {data.competencies.map((competency) => {
+                    const selected = values.competencyId === competency.id;
+                    const label = COMPETENCY_CATEGORIES.find((item) => item.value === competency.category)?.label ?? competency.category;
+
+                    return (
+                      <Pressable
+                        key={competency.id}
+                        onPress={() => {
+                          updateValue('competencyId', competency.id);
+                          updateValue('competencyCategory', competency.category);
+                        }}
+                        style={({ pressed }) => [styles.option, selected && styles.selected, pressed && styles.pressed]}
+                      >
+                        <ShieldCheck color={selected ? Colors.white : Colors.primary} size={20} />
+                        <Text style={[styles.optionTitle, selected && styles.selectedText]}>{label}</Text>
+                        <Text style={styles.optionDescription}>Certificate: {competency.certificate_number || 'Not captured'}</Text>
+                        <Text style={styles.optionDescription}>Issue: {competency.issue_date || 'Not captured'} • Expiry: {competency.expiry_date || 'Not captured'}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <View style={styles.grid}>
+                  {COMPETENCY_CATEGORIES.map((category) => {
+                    const selected = values.competencyCategory === category.value;
+                    return (
+                      <Pressable
+                        key={category.value}
+                        onPress={() => updateValue('competencyCategory', category.value)}
+                        style={({ pressed }) => [styles.option, selected && styles.selected, pressed && styles.pressed]}
+                      >
+                        <ShieldCheck color={selected ? Colors.white : Colors.primary} size={20} />
+                        <Text style={[styles.optionTitle, selected && styles.selectedText]}>{category.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={styles.inlineActions}>
+                <Button
+                  leftIcon={<Plus color={Colors.silver} size={18} />}
+                  onPress={() => navigation.navigate('CompetencyForm', {
+                    clientId: route.params.clientId,
+                    initialCategory: values.competencyCategory,
+                  })}
+                  title="Add competency"
+                  variant="secondary"
+                />
+                {selectedCompetency ? (
+                  <Button
+                    leftIcon={<ShieldCheck color={Colors.silver} size={18} />}
+                    onPress={() => navigation.navigate('CompetencyForm', {
+                      clientId: route.params.clientId,
+                      competencyId: selectedCompetency.id,
+                      initialCategory: selectedCompetency.category,
+                    })}
+                    title="Edit selected competency"
+                    variant="secondary"
+                  />
+                ) : null}
               </View>
             </Card>
           );
@@ -459,6 +597,17 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
                 title="Add another firearm"
                 variant="secondary"
               />
+              {selectedFirearm ? (
+                <Button
+                  leftIcon={<Target color={Colors.silver} size={18} />}
+                  onPress={() => navigation.navigate('FirearmForm', {
+                    clientId: route.params.clientId,
+                    firearmId: selectedFirearm.id,
+                  })}
+                  title="Edit selected firearm"
+                  variant="secondary"
+                />
+              ) : null}
               <Button
                 leftIcon={<ShieldCheck color={Colors.silver} size={18} />}
                 onPress={() => navigation.navigate('CompetencyForm', {
@@ -617,7 +766,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
       case 'review':
       default:
         return (
-          <Card title="Review the application" subtitle="Confirm the core workflow before LicenceGuard creates the case and calculates the document checklist.">
+          <Card title="Review the application" subtitle="Confirm the essential details. LicenceGuard will create the case and calculate the required documents automatically.">
             <View style={styles.reviewGrid}>
               <ReviewRow label="Applicant" value={`${data.client.first_name} ${data.client.surname}`} />
               <ReviewRow label="Application" value={getApplicationCaseTypeLabel(values.applicationType)} />
@@ -644,9 +793,28 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   return (
     <Screen keyboardAvoiding maxWidth={1100}>
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>{isEditing ? 'EDIT APPLICATION BUILDER' : 'NEW APPLICATION BUILDER'}</Text>
-        <Text style={styles.title}>{data.client.first_name} {data.client.surname}</Text>
-        <Text style={styles.muted}>Build the application in the same order it will be prepared: process, subject, source, purpose, tracking and readiness.</Text>
+        <View style={styles.headerActions}>
+          <Button
+            variant="secondary"
+            leftIcon={<UserRound color={Colors.silver} size={18} />}
+            title="Edit client details"
+            onPress={() => navigation.navigate('ClientForm', { clientId: route.params.clientId })}
+          />
+          <Button
+            variant="secondary"
+            leftIcon={<FolderOpen color={Colors.silver} size={18} />}
+            title="Client documents"
+            onPress={() => navigation.navigate('DocumentLibrary', { clientId: route.params.clientId })}
+          />
+        </View>
+        <Text style={styles.eyebrow}>{isEditing ? 'EDIT APPLICATION' : 'PREPARE APPLICATION'}</Text>
+        <Text style={styles.title}>{workflowConfig?.title ?? `${data.client.first_name} ${data.client.surname}`}</Text>
+        <Text style={styles.muted}>
+          {workflowConfig?.subtitle ?? 'Confirm the essential information. LicenceGuard will handle the process and document requirements in the background.'}
+        </Text>
+        {workflowConfig ? (
+          <Text style={styles.clientName}>{data.client.first_name} {data.client.surname}</Text>
+        ) : null}
       </View>
 
       <View style={styles.stepper}>
@@ -673,7 +841,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
       <View style={styles.actions}>
         <Button variant="secondary" leftIcon={<ChevronLeft color={Colors.silver} size={18} />} title={stepIndex === 0 ? 'Cancel' : 'Back'} onPress={goBack} />
         {currentStep.key === 'review' ? (
-          <Button loading={saving} leftIcon={<Save color={Colors.white} size={18} />} title={isEditing ? 'Save and check readiness' : 'Create and check readiness'} onPress={() => void save()} />
+          <Button loading={saving} leftIcon={<Save color={Colors.white} size={18} />} title={isEditing ? 'Save and continue' : 'Create application'} onPress={() => void save()} />
         ) : (
           <Button rightIcon={<ChevronRight color={Colors.white} size={18} />} title="Continue" onPress={goNext} />
         )}
@@ -693,9 +861,11 @@ function ReviewRow({ label, value, fullWidth = false }: { label: string; value: 
 
 const styles = StyleSheet.create({
   header: { gap: Spacing.sm, marginBottom: Spacing.lg },
+  headerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, justifyContent: 'flex-end' },
   eyebrow: { ...Typography.eyebrow, color: Colors.primaryLight },
   title: { ...Typography.pageTitle, color: Colors.white },
   muted: { ...Typography.body, color: Colors.textMuted },
+  clientName: { ...Typography.bodyStrong, color: Colors.silver },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
   stack: { gap: Spacing.lg },
   stepper: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.lg },

@@ -275,15 +275,52 @@ export default function ClientProfileScreen({
       </View>
 
       <Card
-        subtitle="Open every part of this client's LicenceGuard record."
-        title="Client workspace"
+        subtitle="Choose what you need. LicenceGuard will use the client record, select the process and prepare the required documents."
+        title="Start an application"
+      >
+        <View style={styles.workspaceGrid}>
+          <Button
+            leftIcon={<Target color={Colors.white} size={18} />}
+            onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: client.id, workflowAction: 'NEW_FIREARM_APPLICATION' })}
+            style={styles.workspaceButton}
+            title="New Firearm Application"
+          />
+          <Button
+            leftIcon={<ShieldCheck color={Colors.white} size={18} />}
+            onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: client.id, workflowAction: 'NEW_COMPETENCY' })}
+            style={styles.workspaceButton}
+            title="New Competency"
+          />
+          <Button
+            leftIcon={<ShieldCheck color={Colors.white} size={18} />}
+            onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: client.id, workflowAction: 'FURTHER_COMPETENCY' })}
+            style={styles.workspaceButton}
+            title="Further Competency"
+          />
+          <Button
+            leftIcon={<CalendarClock color={Colors.white} size={18} />}
+            onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: client.id, workflowAction: 'FIREARM_RENEWAL' })}
+            style={styles.workspaceButton}
+            title="Firearm Renewal"
+          />
+          <Button
+            leftIcon={<CalendarClock color={Colors.white} size={18} />}
+            onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: client.id, workflowAction: 'COMPETENCY_RENEWAL' })}
+            style={styles.workspaceButton}
+            title="Competency Renewal"
+          />
+        </View>
+      </Card>
+
+      <Card
+        subtitle="Update existing records or open work already in progress."
+        title="Client records"
       >
         <View style={styles.workspaceGrid}>
           <Button leftIcon={<ShieldCheck color={Colors.silver} size={18} />} onPress={() => navigation.navigate('Competencies', { clientId: client.id })} style={styles.workspaceButton} title="Competencies" variant="secondary" />
           <Button leftIcon={<Target color={Colors.silver} size={18} />} onPress={() => navigation.navigate('Firearms', { clientId: client.id })} style={styles.workspaceButton} title="Firearms" variant="secondary" />
           <Button leftIcon={<FolderOpen color={Colors.silver} size={18} />} onPress={() => navigation.navigate('DocumentLibrary', { clientId: client.id })} style={styles.workspaceButton} title="Documents" variant="secondary" />
-          <Button leftIcon={<Gauge color={Colors.silver} size={18} />} onPress={() => navigation.navigate('ApplicationReadiness', { clientId: client.id })} style={styles.workspaceButton} title="Readiness" variant="secondary" />
-          <Button leftIcon={<FileCheck2 color={Colors.white} size={18} />} onPress={() => navigation.navigate('ApplicationCases', { clientId: client.id })} style={styles.workspaceButton} title="Applications" />
+          <Button leftIcon={<FileCheck2 color={Colors.silver} size={18} />} onPress={() => navigation.navigate('ApplicationCases', { clientId: client.id })} style={styles.workspaceButton} title="Existing Applications" variant="secondary" />
         </View>
       </Card>
 

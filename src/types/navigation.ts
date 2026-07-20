@@ -65,6 +65,12 @@ export type RootStackParamList = {
   ApplicationCaseForm: {
     clientId: string;
     applicationCaseId?: string;
+    workflowAction?:
+      | 'NEW_FIREARM_APPLICATION'
+      | 'NEW_COMPETENCY'
+      | 'FURTHER_COMPETENCY'
+      | 'FIREARM_RENEWAL'
+      | 'COMPETENCY_RENEWAL';
   };
 
   DocumentLibrary: {
