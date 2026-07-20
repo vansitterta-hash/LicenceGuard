@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
+import type { PDFFont } from 'pdf-lib';
 import { getPdfTemplateLayout } from '../data/sapsPdfLayoutRegistry';
 import { resolveDocumentField } from './documentEngine';
 import type { DocumentEngineContext, DocumentTemplateDefinition } from '../types/documentEngine';
@@ -50,6 +50,7 @@ export async function renderOfficialPdfTemplate(input: {
   if (!response.ok) response = await fetch(layout.sourceUrl || input.template.sourceUrl);
   if (!response.ok) throw new Error(`Unable to download the official ${input.template.code} template. Check your connection and try again.`);
 
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const pdf = await PDFDocument.load(await response.arrayBuffer());
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();

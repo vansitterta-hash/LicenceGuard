@@ -3,7 +3,7 @@ import { getClientApplicationReadiness } from './applicationReadinessService';
 import { getApplicationCase } from './applicationCaseService';
 import { getClient } from './clientService';
 import { createDocumentSignedUrl, listClientDocuments } from './documentService';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import type { PDFDocument as PDFDocumentType, PDFPage, PDFFont } from 'pdf-lib';
 import {
   getApplicationCaseTypeLabel,
   type ApplicationCaseStatus,
@@ -447,9 +447,11 @@ function wrapText(text: string, maxLength = 88): string[] {
 }
 
 async function addCoverAndChecklist(
-  target: PDFDocument,
-  manifest: ApplicationPackManifest
+  target: PDFDocumentType,
+  manifest: ApplicationPackManifest,
+  pdfLib: typeof import('pdf-lib')
 ): Promise<void> {
+  const { StandardFonts, rgb } = pdfLib;
   const regular = await target.embedFont(StandardFonts.Helvetica);
   const bold = await target.embedFont(StandardFonts.HelveticaBold);
   const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
@@ -487,21 +489,22 @@ async function addCoverAndChecklist(
       cy = 790;
       const continuation = target.addPage([A4_WIDTH, A4_HEIGHT]);
       continuation.drawText('APPLICATION PACK CHECKLIST — CONTINUED', { x: 44, y: 812, size: 14, font: bold });
-      drawChecklistItem(continuation, item, cy, regular, bold);
+      drawChecklistItem(continuation, item, cy, regular, bold, rgb);
       cy -= 42;
     } else {
-      drawChecklistItem(checklist, item, cy, regular, bold);
+      drawChecklistItem(checklist, item, cy, regular, bold, rgb);
       cy -= 42;
     }
   });
 }
 
 function drawChecklistItem(
-  page: any,
+  page: PDFPage,
   item: ApplicationPackItem,
   y: number,
-  regular: any,
-  bold: any
+  regular: PDFFont,
+  bold: PDFFont,
+  rgb: (red: number, green: number, blue: number) => any
 ): void {
   const state = item.state === 'COMPLETE' ? 'INCLUDED' : item.state;
   page.drawRectangle({ x: 44, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.25, 0.25, 0.25) });
@@ -512,9 +515,11 @@ function drawChecklistItem(
 }
 
 async function appendStoredDocument(
-  target: PDFDocument,
-  document: DocumentRecord
+  target: PDFDocumentType,
+  document: DocumentRecord,
+  pdfLib: typeof import('pdf-lib')
 ): Promise<{ included: boolean; reason?: string }> {
+  const { PDFDocument } = pdfLib;
   const mime = (document.mime_type ?? '').toLowerCase();
   const url = await createDocumentSignedUrl(document.storage_path);
   const response = await fetch(url);
@@ -559,14 +564,15 @@ export async function generateAndArchiveApplicationPack(input: {
     throw new Error(`The final application pack cannot be generated yet. ${manifest.blockingReasons.join(' ') || 'Resolve verification warnings first.'}`);
   }
 
-  const pdf = await PDFDocument.create();
-  await addCoverAndChecklist(pdf, manifest);
+  const pdfLib = await import('pdf-lib');
+  const pdf = await pdfLib.PDFDocument.create();
+  await addCoverAndChecklist(pdf, manifest, pdfLib);
   const includedDocumentIds: string[] = [];
   const skippedDocuments: Array<{ documentId: string; name: string; reason: string }> = [];
 
   for (const item of manifest.items.sort((a, b) => a.order - b.order)) {
     if (!item.document) continue;
-    const result = await appendStoredDocument(pdf, item.document);
+    const result = await appendStoredDocument(pdf, item.document, pdfLib);
     if (result.included) includedDocumentIds.push(item.document.id);
     else skippedDocuments.push({ documentId: item.document.id, name: item.document.document_name, reason: result.reason ?? 'Unknown merge error.' });
   }
