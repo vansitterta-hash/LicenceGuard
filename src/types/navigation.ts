@@ -46,6 +46,7 @@ export type RootStackParamList = {
 
   ApplicationReadiness: {
     clientId: string;
+    applicationCaseId?: string;
   };
 
   ApplicationPackGenerator: {

@@ -433,12 +433,14 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     if (!validateAll() || !dealerProfile?.dealerId || !user?.id) return;
     setSaving(true);
     try {
-      if (route.params.applicationCaseId) {
-        await updateApplicationCase(route.params.applicationCaseId, dealerProfile.dealerId, route.params.clientId, user.id, values);
-      } else {
-        await createApplicationCase(dealerProfile.dealerId, route.params.clientId, user.id, values);
-      }
-      navigation.replace('ApplicationReadiness', { clientId: route.params.clientId });
+      const savedCase = route.params.applicationCaseId
+        ? await updateApplicationCase(route.params.applicationCaseId, dealerProfile.dealerId, route.params.clientId, user.id, values)
+        : await createApplicationCase(dealerProfile.dealerId, route.params.clientId, user.id, values);
+
+      navigation.replace('ApplicationReadiness', {
+        clientId: route.params.clientId,
+        applicationCaseId: savedCase.id,
+      });
     } catch (error) {
       Alert.alert(isEditing ? 'Unable to update application' : 'Unable to create application', error instanceof Error ? error.message : 'An unknown error occurred.');
     } finally {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,12 +11,11 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  FileCheck2,
+  ChevronDown,
+  ChevronUp,
   FileOutput,
-  FolderOpen,
-  ShieldCheck,
+  Pencil,
+  Upload,
 } from 'lucide-react-native';
 
 import Button from '../components/Button';
@@ -29,45 +28,26 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type {
   ApplicationCaseReadiness,
-  ApplicationReadinessState,
-  ClientApplicationReadiness,
-  RequirementState,
+  ReadinessRequirement,
 } from '../types/applicationReadiness';
 import { getApplicationCaseTypeLabel } from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
 
-type Props = NativeStackScreenProps<
-  RootStackParamList,
-  'ApplicationReadiness'
->;
+type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationReadiness'>;
 
-export default function ApplicationReadinessScreen({
-  navigation,
-  route,
-}: Props) {
-  const [data, setData] =
-    useState<ClientApplicationReadiness | null>(null);
+export default function ApplicationReadinessScreen({ navigation, route }: Props) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof getClientApplicationReadiness>> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [expandedCaseId, setExpandedCaseId] =
-    useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-
     try {
-      const result = await getClientApplicationReadiness(
-        route.params.clientId
-      );
-      setData(result);
-      setExpandedCaseId((current) =>
-        current ?? result.cases[0]?.caseId ?? null
-      );
+      setData(await getClientApplicationReadiness(route.params.clientId));
     } catch (error) {
       Alert.alert(
-        'Unable to calculate readiness',
-        error instanceof Error
-          ? error.message
-          : 'An unknown error occurred.'
+        'Unable to check the application',
+        error instanceof Error ? error.message : 'An unknown error occurred.'
       );
     } finally {
       setLoading(false);
@@ -76,641 +56,216 @@ export default function ApplicationReadinessScreen({
 
   useEffect(() => {
     void loadData();
-
-    const unsubscribe = navigation.addListener(
-      'focus',
-      () => {
-        void loadData();
-      }
-    );
-
-    return unsubscribe;
+    return navigation.addListener('focus', () => void loadData());
   }, [loadData, navigation]);
+
+  const applicationCase = useMemo(() => {
+    if (!data) return null;
+    return data.cases.find((item) => item.caseId === route.params.applicationCaseId)
+      ?? data.cases[0]
+      ?? null;
+  }, [data, route.params.applicationCaseId]);
 
   if (loading || !data) {
     return (
       <Screen scroll={false}>
-        <View style={styles.loadingState}>
-          <ActivityIndicator
-            color={Colors.primary}
-            size="large"
-          />
-          <Text style={styles.loadingText}>
-            Calculating application readiness...
-          </Text>
+        <View style={styles.loading}>
+          <ActivityIndicator color={Colors.primary} size="large" />
+          <Text style={styles.muted}>Checking what is ready and what is still needed...</Text>
         </View>
       </Screen>
     );
   }
 
-  const visual = getStateVisual(data.state);
+  if (!applicationCase) {
+    return (
+      <Screen maxWidth={820}>
+        <Card style={styles.emptyCard}>
+          <Text style={styles.title}>No application found</Text>
+          <Text style={styles.muted}>Return to the client and choose the task you want LicenceGuard to prepare.</Text>
+          <Button title="Back to client" onPress={() => navigation.navigate('ClientProfile', { clientId: route.params.clientId })} />
+        </Card>
+      </Screen>
+    );
+  }
+
+  const outstanding = applicationCase.requirements.filter(
+    (item) => item.required && item.state !== 'SATISFIED' && item.state !== 'NOT_APPLICABLE'
+  );
+  const completed = applicationCase.requirements.filter(
+    (item) => item.state === 'SATISFIED'
+  );
+  const ready = applicationCase.readyToGenerate;
 
   return (
-    <Screen maxWidth={1120}>
+    <Screen maxWidth={920}>
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.eyebrow}>
-            APPLICATION READINESS ENGINE
-          </Text>
-          <Text style={styles.title}>
-            {data.clientName}
-          </Text>
-          <Text style={styles.subtitle}>
-            LicenceGuard checks every open application
-            against the client, competency, firearm,
-            licence and document records already stored.
-          </Text>
-        </View>
-
-        <View style={styles.headerActions}>
-          <Button
-            leftIcon={
-              <FolderOpen
-                color={Colors.silver}
-                size={18}
-              />
-            }
-            onPress={() =>
-              navigation.navigate('DocumentLibrary', {
-                clientId: data.clientId,
-              })
-            }
-            title="Documents"
-            variant="secondary"
-          />
-
-          <Button
-            leftIcon={
-              <FileCheck2
-                color={Colors.white}
-                size={18}
-              />
-            }
-            onPress={() =>
-              navigation.navigate('ApplicationCases', {
-                clientId: data.clientId,
-              })
-            }
-            title="Application cases"
-          />
-        </View>
+        <Text style={styles.eyebrow}>APPLICATION CHECK</Text>
+        <Text style={styles.title}>{getApplicationCaseTypeLabel(applicationCase.applicationType)}</Text>
+        <Text style={styles.subject}>{applicationCase.subject}</Text>
+        <Text style={styles.subtitle}>
+          LicenceGuard has checked the client, firearm, competency, licence and uploaded documents automatically.
+        </Text>
       </View>
 
-      <Card
-        padding="large"
-        style={[
-          styles.overviewCard,
-          { borderColor: visual.borderColor },
-        ]}
-      >
-        <View style={styles.overviewRow}>
-          <View style={styles.overviewIdentity}>
-            <View
-              style={[
-                styles.overviewIcon,
-                { backgroundColor: visual.backgroundColor },
-              ]}
-            >
-              <visual.Icon
-                color={visual.color}
-                size={32}
-              />
-            </View>
-
-            <View style={styles.overviewText}>
-              <Text style={styles.overviewEyebrow}>
-                OVERALL STATUS
-              </Text>
-              <Text
-                style={[
-                  styles.overviewTitle,
-                  { color: visual.color },
-                ]}
-              >
-                {visual.label}
-              </Text>
-              <Text style={styles.overviewDetail}>
-                {getOverallMessage(data)}
-              </Text>
-            </View>
+      <Card padding="large" style={[styles.statusCard, ready ? styles.readyBorder : styles.actionBorder]}>
+        <View style={styles.statusRow}>
+          <View style={[styles.statusIcon, ready ? styles.readyBackground : styles.actionBackground]}>
+            {ready ? (
+              <CheckCircle2 color={Colors.success} size={34} />
+            ) : (
+              <AlertTriangle color={Colors.warning} size={34} />
+            )}
           </View>
-
-          <View style={styles.scoreBlock}>
-            <Text
-              style={[
-                styles.score,
-                { color: visual.color },
-              ]}
-            >
-              {data.score}%
+          <View style={styles.statusText}>
+            <Text style={[styles.statusTitle, { color: ready ? Colors.success : Colors.warning }]}>
+              {ready ? 'Ready to compile' : 'A few items still need attention'}
             </Text>
-            <Text style={styles.scoreLabel}>
-              readiness
+            <Text style={styles.statusDetail}>
+              {ready
+                ? 'Everything required for this application is available.'
+                : `${outstanding.length} required ${outstanding.length === 1 ? 'item is' : 'items are'} still missing, expired or awaiting confirmation.`}
             </Text>
           </View>
-        </View>
-
-        <View style={styles.progressTrack}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${data.score}%`,
-                backgroundColor: visual.color,
-              },
-            ]}
-          />
         </View>
       </Card>
 
-      <View style={styles.summaryGrid}>
-        <SummaryTile
-          label="Ready"
-          value={data.readyCases}
-          tone="success"
+      {!ready ? (
+        <Card title="Do this next" subtitle="Only the outstanding items are shown. Tap an item to upload or replace it.">
+          <View style={styles.list}>
+            {outstanding.map((requirement) => (
+              <RequirementRow
+                key={requirement.key}
+                requirement={requirement}
+                onPress={() => {
+                  if (requirement.documentType) {
+                    navigation.navigate('DocumentLibrary', {
+                      clientId: route.params.clientId,
+                      applicationCaseId: applicationCase.caseId,
+                      documentType: requirement.documentType,
+                      openUpload: true,
+                    });
+                    return;
+                  }
+
+                  navigation.navigate('ApplicationCaseForm', {
+                    clientId: route.params.clientId,
+                    applicationCaseId: applicationCase.caseId,
+                  });
+                }}
+              />
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      <View style={styles.actions}>
+        <Button
+          leftIcon={<FileOutput color={Colors.white} size={19} />}
+          title="Compile Application Pack"
+          size="large"
+          fullWidth
+          disabled={!ready}
+          onPress={() => navigation.navigate('ApplicationPackGenerator', {
+            clientId: route.params.clientId,
+            applicationCaseId: applicationCase.caseId,
+          })}
         />
-        <SummaryTile
-          label="Action required"
-          value={data.actionRequiredCases}
-          tone="warning"
-        />
-        <SummaryTile
-          label="Blocked"
-          value={data.blockedCases}
-          tone="danger"
-        />
-        <SummaryTile
-          label="Open cases"
-          value={data.cases.length}
-          tone="neutral"
+        <Button
+          leftIcon={<Pencil color={Colors.silver} size={18} />}
+          title="Edit application details"
+          variant="secondary"
+          onPress={() => navigation.navigate('ApplicationCaseForm', {
+            clientId: route.params.clientId,
+            applicationCaseId: applicationCase.caseId,
+          })}
         />
       </View>
 
-      {data.cases.length === 0 ? (
-        <Card style={styles.emptyCard}>
-          <FileCheck2
-            color={Colors.silverDark}
-            size={42}
-          />
-          <Text style={styles.emptyTitle}>
-            No open application cases
-          </Text>
-          <Text style={styles.emptyText}>
-            Open an application case first. The readiness
-            engine will then calculate the required records
-            and documents for that specific application.
-          </Text>
-          <Button
-            onPress={() =>
-              navigation.navigate('ApplicationCaseForm', {
-                clientId: data.clientId,
-              })
-            }
-            title="Open application case"
-          />
+      {completed.length > 0 ? (
+        <Card padding="small">
+          <Pressable
+            onPress={() => setShowCompleted((current) => !current)}
+            style={({ pressed }) => [styles.completedHeader, pressed ? styles.pressed : null]}
+          >
+            <View style={styles.completedTitleRow}>
+              <CheckCircle2 color={Colors.success} size={18} />
+              <Text style={styles.completedTitle}>{completed.length} completed items</Text>
+            </View>
+            {showCompleted ? <ChevronUp color={Colors.silverDark} size={18} /> : <ChevronDown color={Colors.silverDark} size={18} />}
+          </Pressable>
+          {showCompleted ? (
+            <View style={styles.completedList}>
+              {completed.map((item) => (
+                <View key={item.key} style={styles.completedRow}>
+                  <CheckCircle2 color={Colors.success} size={16} />
+                  <Text style={styles.completedLabel}>{item.label}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </Card>
-      ) : (
-        <View style={styles.caseList}>
-          {data.cases.map((applicationCase) => (
-            <CaseReadinessCard
-              applicationCase={applicationCase}
-              expanded={
-                expandedCaseId === applicationCase.caseId
-              }
-              key={applicationCase.caseId}
-              onEdit={() =>
-                navigation.navigate('ApplicationCaseForm', {
-                  clientId: data.clientId,
-                  applicationCaseId:
-                    applicationCase.caseId,
-                })
-              }
-              onDocument={(documentType) =>
-                navigation.navigate('DocumentLibrary', {
-                  clientId: data.clientId,
-                  applicationCaseId: applicationCase.caseId,
-                  documentType,
-                  openUpload: true,
-                })
-              }
-              onGenerate={() =>
-                navigation.navigate('ApplicationPackGenerator', {
-                  clientId: data.clientId,
-                  applicationCaseId:
-                    applicationCase.caseId,
-                })
-              }
-              onToggle={() =>
-                setExpandedCaseId((current) =>
-                  current === applicationCase.caseId
-                    ? null
-                    : applicationCase.caseId
-                )
-              }
-            />
-          ))}
-        </View>
-      )}
+      ) : null}
     </Screen>
   );
 }
 
-function CaseReadinessCard({
-  applicationCase,
-  expanded,
-  onToggle,
-  onEdit,
-  onGenerate,
-  onDocument,
-}: {
-  applicationCase: ApplicationCaseReadiness;
-  expanded: boolean;
-  onToggle: () => void;
-  onEdit: () => void;
-  onGenerate: () => void;
-  onDocument: (documentType: import('../types/document').DocumentType) => void;
-}) {
-  const visual = getStateVisual(applicationCase.state);
+function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequirement; onPress: () => void }) {
+  const stateLabel = requirement.state === 'EXPIRED'
+    ? 'Expired'
+    : requirement.state === 'UNVERIFIED'
+      ? 'Confirm'
+      : 'Missing';
 
   return (
-    <Card style={styles.caseCard}>
-      <Pressable
-        onPress={onToggle}
-        style={({ pressed }) => [
-          styles.caseHeader,
-          pressed ? styles.pressed : null,
-        ]}
-      >
-        <View style={styles.caseHeaderMain}>
-          <View
-            style={[
-              styles.caseStatusIcon,
-              { backgroundColor: visual.backgroundColor },
-            ]}
-          >
-            <visual.Icon
-              color={visual.color}
-              size={22}
-            />
-          </View>
-
-          <View style={styles.caseIdentity}>
-            <Text style={styles.caseType}>
-              {getApplicationCaseTypeLabel(
-                applicationCase.applicationType
-              )}
-            </Text>
-            <Text style={styles.caseSubject}>
-              {applicationCase.subject}
-            </Text>
-            <Text style={styles.caseMeta}>
-              {applicationCase.missingCount} missing ·{' '}
-              {applicationCase.warningCount} awaiting
-              verification
-            </Text>
-          </View>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.requirement, pressed ? styles.pressed : null]}>
+      <View style={styles.requirementMain}>
+        <View style={styles.requirementIcon}>
+          <Upload color={Colors.warning} size={19} />
         </View>
-
-        <View style={styles.caseHeaderRight}>
-          <View
-            style={[
-              styles.stateBadge,
-              {
-                borderColor: visual.borderColor,
-                backgroundColor: visual.backgroundColor,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.stateBadgeText,
-                { color: visual.color },
-              ]}
-            >
-              {visual.label}
-            </Text>
-          </View>
-          <Text style={styles.caseScore}>
-            {applicationCase.score}%
-          </Text>
-          <ChevronRight
-            color={Colors.silverDark}
-            size={20}
-            style={
-              expanded
-                ? styles.chevronExpanded
-                : undefined
-            }
-          />
+        <View style={styles.requirementText}>
+          <Text style={styles.requirementLabel}>{requirement.label}</Text>
+          <Text style={styles.requirementDetail}>{requirement.detail}</Text>
         </View>
-      </Pressable>
-
-      {expanded ? (
-        <View style={styles.requirementSection}>
-          <View style={styles.requirementHeader}>
-            <View>
-              <Text style={styles.requirementTitle}>
-                Required application items
-              </Text>
-              <Text style={styles.requirementSubtitle}>
-                Proof of address is not treated as a default
-                requirement.
-              </Text>
-            </View>
-
-            <View style={styles.requirementActions}>
-              <Button
-                leftIcon={
-                  <FileOutput
-                    color={Colors.white}
-                    size={18}
-                  />
-                }
-                onPress={onGenerate}
-                title={
-                  applicationCase.readyToGenerate
-                    ? 'Generate pack'
-                    : 'Review draft pack'
-                }
-              />
-              <Button
-                onPress={onEdit}
-                title="Edit case"
-                variant="secondary"
-              />
-            </View>
-          </View>
-
-          <View style={styles.requirementList}>
-            {applicationCase.requirements.map(
-              (requirement) => (
-                <RequirementRow
-                  key={requirement.key}
-                  label={requirement.label}
-                  detail={requirement.detail}
-                  required={requirement.required}
-                  state={requirement.state}
-                  onPress={requirement.documentType ? () => onDocument(requirement.documentType!) : undefined}
-                />
-              )
-            )}
-          </View>
-
-          <View
-            style={[
-              styles.generateState,
-              applicationCase.readyToGenerate
-                ? styles.generateReady
-                : styles.generateBlocked,
-            ]}
-          >
-            {applicationCase.readyToGenerate ? (
-              <CheckCircle2
-                color={Colors.success}
-                size={23}
-              />
-            ) : (
-              <CircleAlert
-                color={Colors.warning}
-                size={23}
-              />
-            )}
-            <View style={styles.generateContent}>
-              <Text style={styles.generateTitle}>
-                {applicationCase.readyToGenerate
-                  ? 'Ready for pack generation'
-                  : 'Not ready for pack generation'}
-              </Text>
-              <Text style={styles.generateText}>
-                {applicationCase.readyToGenerate
-                  ? 'All required items are present and verified.'
-                  : 'Resolve the missing, expired or unverified required items first.'}
-              </Text>
-            </View>
-          </View>
-        </View>
-      ) : null}
-    </Card>
-  );
-}
-
-function RequirementRow({
-  label,
-  detail,
-  state,
-  required,
-  onPress,
-}: {
-  label: string;
-  detail: string;
-  state: RequirementState;
-  required: boolean;
-  onPress?: () => void;
-}) {
-  const visual = getRequirementVisual(state);
-
-  const content = (
-    <>
-      <visual.Icon
-        color={visual.color}
-        size={20}
-      />
-      <View style={styles.requirementContent}>
-        <View style={styles.requirementLabelRow}>
-          <Text style={styles.requirementLabel}>
-            {label}
-          </Text>
-          {!required ? (
-            <Text style={styles.optionalLabel}>
-              Optional
-            </Text>
-          ) : null}
-        </View>
-        <Text style={styles.requirementDetail}>
-          {detail}
-        </Text>
       </View>
-      <Text
-        style={[
-          styles.requirementState,
-          { color: visual.color },
-        ]}
-      >
-        {visual.label}
-      </Text>
-    </>
-  );
-
-  if (!onPress) {
-    return <View style={styles.requirementRow}>{content}</View>;
-  }
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.requirementRow, pressed ? styles.pressed : null]}
-    >
-      {content}
+      <Text style={styles.requirementState}>{stateLabel}</Text>
     </Pressable>
   );
 }
 
-function SummaryTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'success' | 'warning' | 'danger' | 'neutral';
-}) {
-  const color =
-    tone === 'success'
-      ? Colors.success
-      : tone === 'warning'
-        ? Colors.warning
-        : tone === 'danger'
-          ? Colors.danger
-          : Colors.silver;
-
-  return (
-    <Card style={styles.summaryTile}>
-      <Text style={[styles.summaryValue, { color }]}> 
-        {value}
-      </Text>
-      <Text style={styles.summaryLabel}>{label}</Text>
-    </Card>
-  );
-}
-
-function getOverallMessage(
-  data: ClientApplicationReadiness
-): string {
-  switch (data.state) {
-    case 'READY':
-      return 'Every open application case is ready for document-pack generation.';
-    case 'ACTION_REQUIRED':
-      return 'Required records are present, but one or more items still require verification.';
-    case 'BLOCKED':
-      return 'One or more open cases are missing required records or documents.';
-    case 'NO_CASES':
-      return 'Open an application case to calculate its readiness.';
-  }
-}
-
-function getStateVisual(state: ApplicationReadinessState) {
-  switch (state) {
-    case 'READY':
-      return {
-        label: 'READY',
-        color: Colors.success,
-        borderColor: Colors.success,
-        backgroundColor: 'rgba(40, 199, 111, 0.12)',
-        Icon: ShieldCheck,
-      };
-    case 'ACTION_REQUIRED':
-      return {
-        label: 'ACTION REQUIRED',
-        color: Colors.warning,
-        borderColor: Colors.warning,
-        backgroundColor: 'rgba(255, 193, 7, 0.12)',
-        Icon: AlertTriangle,
-      };
-    case 'BLOCKED':
-      return {
-        label: 'BLOCKED',
-        color: Colors.danger,
-        borderColor: Colors.danger,
-        backgroundColor: 'rgba(229, 57, 53, 0.12)',
-        Icon: CircleAlert,
-      };
-    case 'NO_CASES':
-      return {
-        label: 'NO OPEN CASES',
-        color: Colors.silver,
-        borderColor: Colors.borderStrong,
-        backgroundColor: Colors.surfaceSoft,
-        Icon: FileCheck2,
-      };
-  }
-}
-
-function getRequirementVisual(state: RequirementState) {
-  switch (state) {
-    case 'SATISFIED':
-      return { label: 'Complete', color: Colors.success, Icon: CheckCircle2 };
-    case 'UNVERIFIED':
-      return { label: 'Verify', color: Colors.warning, Icon: AlertTriangle };
-    case 'EXPIRED':
-      return { label: 'Expired', color: Colors.danger, Icon: CircleAlert };
-    case 'MISSING':
-      return { label: 'Missing', color: Colors.danger, Icon: CircleAlert };
-    case 'NOT_APPLICABLE':
-      return { label: 'N/A', color: Colors.silverDark, Icon: FileCheck2 };
-  }
-}
-
 const styles = StyleSheet.create({
-  loadingState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.lg },
-  loadingText: { ...Typography.body, color: Colors.textMuted },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing.xl, marginBottom: Spacing.xl, flexWrap: 'wrap' },
-  headerContent: { flex: 1, minWidth: 280 },
-  eyebrow: { ...Typography.caption, color: Colors.primary, fontWeight: '900', letterSpacing: 1.2 },
-  title: { ...Typography.pageTitle, color: Colors.white, marginTop: Spacing.xs },
+  loading: { alignItems: 'center', flex: 1, justifyContent: 'center', gap: Spacing.md },
+  muted: { ...Typography.body, color: Colors.textMuted, textAlign: 'center' },
+  header: { marginBottom: Spacing.xl },
+  eyebrow: { ...Typography.eyebrow, color: Colors.primaryLight, marginBottom: Spacing.xs },
+  title: { ...Typography.pageTitle, color: Colors.text },
+  subject: { ...Typography.cardTitle, color: Colors.silver, marginTop: Spacing.xs },
   subtitle: { ...Typography.body, color: Colors.textMuted, marginTop: Spacing.sm, maxWidth: 720 },
-  headerActions: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
-  overviewCard: { marginBottom: Spacing.lg, borderWidth: 1 },
-  overviewRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.xl, flexWrap: 'wrap' },
-  overviewIdentity: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, flex: 1, minWidth: 280 },
-  overviewIcon: { width: 64, height: 64, borderRadius: Radius.pill, alignItems: 'center', justifyContent: 'center' },
-  overviewText: { flex: 1 },
-  overviewEyebrow: { ...Typography.caption, color: Colors.textMuted, fontWeight: '800' },
-  overviewTitle: { ...Typography.sectionTitle, marginTop: 2 },
-  overviewDetail: { ...Typography.body, color: Colors.textMuted, marginTop: Spacing.xs },
-  scoreBlock: { alignItems: 'flex-end' },
-  score: { ...Typography.pageTitle, fontSize: 42 },
-  scoreLabel: { ...Typography.caption, color: Colors.textMuted },
-  progressTrack: { height: 8, backgroundColor: Colors.surfaceSoft, borderRadius: Radius.pill, overflow: 'hidden', marginTop: Spacing.lg },
-  progressFill: { height: '100%', borderRadius: Radius.pill },
-  summaryGrid: { flexDirection: 'row', gap: Spacing.md, flexWrap: 'wrap', marginBottom: Spacing.lg },
-  summaryTile: { minWidth: 150, flex: 1 },
-  summaryValue: { ...Typography.sectionTitle, fontWeight: '900' },
-  summaryLabel: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xs },
-  emptyCard: { alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.xxl },
-  emptyTitle: { ...Typography.cardTitle, color: Colors.white },
-  emptyText: { ...Typography.body, color: Colors.textMuted, textAlign: 'center', maxWidth: 620 },
-  caseList: { gap: Spacing.lg },
-  caseCard: { padding: 0, overflow: 'hidden' },
-  caseHeader: { padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.lg },
-  pressed: { opacity: 0.8 },
-  caseHeaderMain: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, flex: 1 },
-  caseStatusIcon: { width: 44, height: 44, borderRadius: Radius.pill, alignItems: 'center', justifyContent: 'center' },
-  caseIdentity: { flex: 1 },
-  caseType: { ...Typography.cardTitle, color: Colors.white },
-  caseSubject: { ...Typography.body, color: Colors.silver, marginTop: 2 },
-  caseMeta: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xs },
-  caseHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  stateBadge: { borderWidth: 1, borderRadius: Radius.pill, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
-  stateBadgeText: { ...Typography.caption, fontWeight: '900' },
-  caseScore: { ...Typography.cardTitle, color: Colors.white, minWidth: 48, textAlign: 'right' },
-  chevronExpanded: { transform: [{ rotate: '90deg' }] },
-  requirementSection: { borderTopWidth: 1, borderTopColor: Colors.border, padding: Spacing.lg, backgroundColor: Colors.surfaceRaised },
-  requirementActions: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
-  requirementHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.lg, marginBottom: Spacing.lg, flexWrap: 'wrap' },
-  requirementTitle: { ...Typography.cardTitle, color: Colors.white },
-  requirementSubtitle: { ...Typography.caption, color: Colors.textMuted, marginTop: 2 },
-  requirementList: { gap: Spacing.sm },
-  requirementRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, padding: Spacing.md, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg },
-  requirementContent: { flex: 1 },
-  requirementLabelRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
-  requirementLabel: { ...Typography.body, color: Colors.white, fontWeight: '800' },
-  optionalLabel: { ...Typography.caption, color: Colors.info, borderWidth: 1, borderColor: Colors.info, borderRadius: Radius.pill, paddingHorizontal: Spacing.sm, paddingVertical: 1 },
-  requirementDetail: { ...Typography.caption, color: Colors.textMuted, marginTop: 3 },
-  requirementState: { ...Typography.caption, fontWeight: '900' },
-  generateState: { marginTop: Spacing.lg, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.md, flexDirection: 'row', gap: Spacing.md, alignItems: 'center' },
-  generateReady: { borderColor: Colors.success, backgroundColor: 'rgba(40, 199, 111, 0.08)' },
-  generateBlocked: { borderColor: Colors.warning, backgroundColor: 'rgba(255, 193, 7, 0.08)' },
-  generateContent: { flex: 1 },
-  generateTitle: { ...Typography.body, color: Colors.white, fontWeight: '800' },
-  generateText: { ...Typography.caption, color: Colors.textMuted, marginTop: 2 },
+  emptyCard: { gap: Spacing.lg },
+  statusCard: { marginBottom: Spacing.lg },
+  readyBorder: { borderColor: Colors.success },
+  actionBorder: { borderColor: Colors.warning },
+  statusRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.lg },
+  statusIcon: { alignItems: 'center', borderRadius: Radius.xl, height: 66, justifyContent: 'center', width: 66 },
+  readyBackground: { backgroundColor: 'rgba(40,199,111,0.12)' },
+  actionBackground: { backgroundColor: 'rgba(223,174,43,0.12)' },
+  statusText: { flex: 1 },
+  statusTitle: { ...Typography.sectionTitle },
+  statusDetail: { ...Typography.body, color: Colors.textMuted, marginTop: Spacing.xs },
+  list: { gap: Spacing.sm },
+  requirement: { alignItems: 'center', backgroundColor: Colors.surfaceRaised, borderColor: Colors.border, borderRadius: Radius.lg, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', padding: Spacing.md },
+  requirementMain: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: Spacing.md },
+  requirementIcon: { alignItems: 'center', backgroundColor: Colors.surfaceSoft, borderRadius: Radius.md, height: 42, justifyContent: 'center', width: 42 },
+  requirementText: { flex: 1 },
+  requirementLabel: { ...Typography.bodyStrong, color: Colors.text },
+  requirementDetail: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
+  requirementState: { ...Typography.caption, color: Colors.warning, marginLeft: Spacing.md },
+  actions: { gap: Spacing.md, marginVertical: Spacing.xl },
+  completedHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', padding: Spacing.sm },
+  completedTitleRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.sm },
+  completedTitle: { ...Typography.bodyStrong, color: Colors.silver },
+  completedList: { borderTopColor: Colors.border, borderTopWidth: 1, gap: Spacing.sm, marginTop: Spacing.sm, padding: Spacing.md },
+  completedRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.sm },
+  completedLabel: { ...Typography.body, color: Colors.textMuted },
+  pressed: { opacity: 0.75 },
 });
