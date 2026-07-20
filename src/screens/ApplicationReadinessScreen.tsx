@@ -10,35 +10,45 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   AlertTriangle,
+  BookOpenCheck,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   FileOutput,
   Pencil,
+  Sparkles,
   Upload,
 } from 'lucide-react-native';
 
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Screen from '../components/Screen';
+import { useAuth } from '../context/AuthContext';
+import {
+  prepareSuggestedApplicationDocuments,
+  suggestApplicationDocuments,
+  type ApplicationDocumentSuggestion,
+} from '../services/applicationDocumentSuggestionService';
 import { getClientApplicationReadiness } from '../services/applicationReadinessService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
-import type {
-  ApplicationCaseReadiness,
-  ReadinessRequirement,
-} from '../types/applicationReadiness';
+import type { ReadinessRequirement } from '../types/applicationReadiness';
 import { getApplicationCaseTypeLabel } from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationReadiness'>;
+type SuggestionResult = Awaited<ReturnType<typeof suggestApplicationDocuments>>;
 
 export default function ApplicationReadinessScreen({ navigation, route }: Props) {
+  const { dealerProfile, user } = useAuth();
   const [data, setData] = useState<Awaited<ReturnType<typeof getClientApplicationReadiness>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [suggestionResult, setSuggestionResult] = useState<SuggestionResult | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [preparingSuggestions, setPreparingSuggestions] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -66,6 +76,63 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       ?? null;
   }, [data, route.params.applicationCaseId]);
 
+  const loadSuggestions = useCallback(async () => {
+    if (!applicationCase?.caseId || !applicationCase.firearmId) {
+      setSuggestionResult(null);
+      return;
+    }
+
+    setLoadingSuggestions(true);
+    try {
+      setSuggestionResult(await suggestApplicationDocuments(applicationCase.caseId));
+    } catch (error) {
+      Alert.alert(
+        'Unable to find application documents',
+        error instanceof Error ? error.message : 'An unknown error occurred.'
+      );
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, [applicationCase?.caseId, applicationCase?.firearmId]);
+
+  useEffect(() => {
+    void loadSuggestions();
+  }, [loadSuggestions]);
+
+  const prepareSuggestions = async () => {
+    if (!dealerProfile?.dealerId || !user?.id || !applicationCase || !suggestionResult) {
+      Alert.alert('Unable to prepare documents', 'The signed-in dealer or application context is missing.');
+      return;
+    }
+
+    setPreparingSuggestions(true);
+    try {
+      const added = await prepareSuggestedApplicationDocuments({
+        dealerId: dealerProfile.dealerId,
+        userId: user.id,
+        clientId: route.params.clientId,
+        applicationCaseId: applicationCase.caseId,
+        suggestions: suggestionResult.suggestions,
+        context: suggestionResult.context,
+      });
+
+      Alert.alert(
+        added > 0 ? 'Application documents prepared' : 'Documents already prepared',
+        added > 0
+          ? `${added} matched working ${added === 1 ? 'document has' : 'documents have'} been attached to this application. The original reference files remain unchanged.`
+          : 'The matched working documents are already attached to this application.'
+      );
+      await loadData();
+    } catch (error) {
+      Alert.alert(
+        'Unable to prepare documents',
+        error instanceof Error ? error.message : 'An unknown error occurred.'
+      );
+    } finally {
+      setPreparingSuggestions(false);
+    }
+  };
+
   if (loading || !data) {
     return (
       <Screen scroll={false}>
@@ -92,10 +159,11 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const outstanding = applicationCase.requirements.filter(
     (item) => item.required && item.state !== 'SATISFIED' && item.state !== 'NOT_APPLICABLE'
   );
-  const completed = applicationCase.requirements.filter(
-    (item) => item.state === 'SATISFIED'
-  );
+  const completed = applicationCase.requirements.filter((item) => item.state === 'SATISFIED');
   const ready = applicationCase.readyToGenerate;
+  const motivationSuggestions = suggestionResult?.suggestions.filter((item) => item.kind === 'MOTIVATION') ?? [];
+  const informationSuggestions = suggestionResult?.suggestions.filter((item) => item.kind === 'FIREARM_INFORMATION') ?? [];
+  const hasSuggestions = motivationSuggestions.length > 0 || informationSuggestions.length > 0;
 
   return (
     <Screen maxWidth={920}>
@@ -111,11 +179,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       <Card padding="large" style={[styles.statusCard, ready ? styles.readyBorder : styles.actionBorder]}>
         <View style={styles.statusRow}>
           <View style={[styles.statusIcon, ready ? styles.readyBackground : styles.actionBackground]}>
-            {ready ? (
-              <CheckCircle2 color={Colors.success} size={34} />
-            ) : (
-              <AlertTriangle color={Colors.warning} size={34} />
-            )}
+            {ready ? <CheckCircle2 color={Colors.success} size={34} /> : <AlertTriangle color={Colors.warning} size={34} />}
           </View>
           <View style={styles.statusText}>
             <Text style={[styles.statusTitle, { color: ready ? Colors.success : Colors.warning }]}>
@@ -129,6 +193,50 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
           </View>
         </View>
       </Card>
+
+      {applicationCase.firearmId ? (
+        <Card
+          title="Suggested application documents"
+          subtitle="LicenceGuard matches the calibre first, then checks firearm category, make, model and application purpose. Conflicting calibres are rejected."
+        >
+          {loadingSuggestions ? (
+            <View style={styles.suggestionLoading}>
+              <ActivityIndicator color={Colors.primary} />
+              <Text style={styles.mutedLeft}>Finding the strongest matching motivation and firearm information...</Text>
+            </View>
+          ) : hasSuggestions ? (
+            <View style={styles.suggestionContent}>
+              {motivationSuggestions.length > 0 ? (
+                <SuggestionGroup title="Motivations" items={motivationSuggestions} />
+              ) : (
+                <View style={styles.noMatch}>
+                  <AlertTriangle color={Colors.warning} size={18} />
+                  <Text style={styles.noMatchText}>No calibre-compatible motivation was found. LicenceGuard will not use a document for another calibre.</Text>
+                </View>
+              )}
+
+              {informationSuggestions.length > 0 ? (
+                <SuggestionGroup title="Firearm and calibre information" items={informationSuggestions} />
+              ) : null}
+
+              <Button
+                leftIcon={<Sparkles color={Colors.white} size={18} />}
+                title={preparingSuggestions ? 'Preparing documents...' : 'Prepare Suggested Documents'}
+                disabled={preparingSuggestions}
+                onPress={() => void prepareSuggestions()}
+              />
+              <Text style={styles.helperText}>
+                Working copies are linked to this application with the current client, firearm, serial number, make, model, calibre, licence section and motivation context. Source documents remain unchanged.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.noMatch}>
+              <AlertTriangle color={Colors.warning} size={18} />
+              <Text style={styles.noMatchText}>No safe match was found. Add a suitable motivation or firearm-information document rather than reusing an incompatible one.</Text>
+            </View>
+          )}
+        </Card>
+      ) : null}
 
       {!ready ? (
         <Card title="Do this next" subtitle="Only the outstanding items are shown. Tap an item to upload or replace it.">
@@ -184,10 +292,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
       {completed.length > 0 ? (
         <Card padding="small">
-          <Pressable
-            onPress={() => setShowCompleted((current) => !current)}
-            style={({ pressed }) => [styles.completedHeader, pressed ? styles.pressed : null]}
-          >
+          <Pressable onPress={() => setShowCompleted((current) => !current)} style={({ pressed }) => [styles.completedHeader, pressed ? styles.pressed : null]}>
             <View style={styles.completedTitleRow}>
               <CheckCircle2 color={Colors.success} size={18} />
               <Text style={styles.completedTitle}>{completed.length} completed items</Text>
@@ -210,19 +315,33 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 }
 
+function SuggestionGroup({ title, items }: { title: string; items: ApplicationDocumentSuggestion[] }) {
+  return (
+    <View style={styles.suggestionGroup}>
+      <View style={styles.suggestionGroupTitleRow}>
+        <BookOpenCheck color={Colors.primaryLight} size={18} />
+        <Text style={styles.suggestionGroupTitle}>{title}</Text>
+      </View>
+      {items.map((suggestion, index) => (
+        <View key={suggestion.item.id} style={styles.suggestionRow}>
+          <View style={styles.suggestionRank}><Text style={styles.suggestionRankText}>{index + 1}</Text></View>
+          <View style={styles.suggestionText}>
+            <Text style={styles.suggestionTitle}>{suggestion.item.title}</Text>
+            <Text style={styles.suggestionReason}>{suggestion.reason}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequirement; onPress: () => void }) {
-  const stateLabel = requirement.state === 'EXPIRED'
-    ? 'Expired'
-    : requirement.state === 'UNVERIFIED'
-      ? 'Confirm'
-      : 'Missing';
+  const stateLabel = requirement.state === 'EXPIRED' ? 'Expired' : requirement.state === 'UNVERIFIED' ? 'Confirm' : 'Missing';
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.requirement, pressed ? styles.pressed : null]}>
       <View style={styles.requirementMain}>
-        <View style={styles.requirementIcon}>
-          <Upload color={Colors.warning} size={19} />
-        </View>
+        <View style={styles.requirementIcon}><Upload color={Colors.warning} size={19} /></View>
         <View style={styles.requirementText}>
           <Text style={styles.requirementLabel}>{requirement.label}</Text>
           <Text style={styles.requirementDetail}>{requirement.detail}</Text>
@@ -236,6 +355,7 @@ function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequir
 const styles = StyleSheet.create({
   loading: { alignItems: 'center', flex: 1, justifyContent: 'center', gap: Spacing.md },
   muted: { ...Typography.body, color: Colors.textMuted, textAlign: 'center' },
+  mutedLeft: { ...Typography.body, color: Colors.textMuted, flex: 1 },
   header: { marginBottom: Spacing.xl },
   eyebrow: { ...Typography.eyebrow, color: Colors.primaryLight, marginBottom: Spacing.xs },
   title: { ...Typography.pageTitle, color: Colors.text },
@@ -252,6 +372,20 @@ const styles = StyleSheet.create({
   statusText: { flex: 1 },
   statusTitle: { ...Typography.sectionTitle },
   statusDetail: { ...Typography.body, color: Colors.textMuted, marginTop: Spacing.xs },
+  suggestionLoading: { alignItems: 'center', flexDirection: 'row', gap: Spacing.md, paddingVertical: Spacing.md },
+  suggestionContent: { gap: Spacing.lg },
+  suggestionGroup: { gap: Spacing.sm },
+  suggestionGroupTitleRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.sm },
+  suggestionGroupTitle: { ...Typography.bodyStrong, color: Colors.silver },
+  suggestionRow: { alignItems: 'flex-start', backgroundColor: Colors.surfaceRaised, borderColor: Colors.border, borderRadius: Radius.lg, borderWidth: 1, flexDirection: 'row', gap: Spacing.md, padding: Spacing.md },
+  suggestionRank: { alignItems: 'center', backgroundColor: Colors.primarySoft, borderRadius: Radius.md, height: 28, justifyContent: 'center', width: 28 },
+  suggestionRankText: { ...Typography.caption, color: Colors.primaryLight, fontWeight: '800' },
+  suggestionText: { flex: 1 },
+  suggestionTitle: { ...Typography.bodyStrong, color: Colors.text },
+  suggestionReason: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
+  noMatch: { alignItems: 'flex-start', backgroundColor: Colors.surfaceRaised, borderColor: Colors.warning, borderRadius: Radius.lg, borderWidth: 1, flexDirection: 'row', gap: Spacing.sm, padding: Spacing.md },
+  noMatchText: { ...Typography.body, color: Colors.textMuted, flex: 1 },
+  helperText: { ...Typography.caption, color: Colors.textMuted },
   list: { gap: Spacing.sm },
   requirement: { alignItems: 'center', backgroundColor: Colors.surfaceRaised, borderColor: Colors.border, borderRadius: Radius.lg, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', padding: Spacing.md },
   requirementMain: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: Spacing.md },

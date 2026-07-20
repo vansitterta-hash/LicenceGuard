@@ -72,6 +72,14 @@ export async function addReferenceDocumentToClient(
     clientId: string;
     applicationCaseId?: string;
     item: ReferenceLibraryItem;
+    personalisation?: {
+      client: Record<string, unknown>;
+      firearm: Record<string, unknown> | null;
+      applicationType: string;
+      licenceSection: string | null;
+      motivationSummary: string | null;
+      matchReason: string;
+    };
   }
 ): Promise<DocumentRecord> {
   const sourceUrl = buildReferenceLibraryUrl(
@@ -90,7 +98,18 @@ export async function addReferenceDocumentToClient(
   const timestamp = new Date()
     .toISOString()
     .replace(/[:.]/g, '-');
-  const storedFileName = `${timestamp}_${sanitiseFileName(
+  const subject = input.personalisation?.firearm as { make?: string; model?: string | null; calibre?: string; serialNumber?: string } | null | undefined;
+  const personalisedPrefix = input.personalisation
+    ? sanitiseFileName([
+        (input.personalisation.client as { firstName?: string }).firstName,
+        (input.personalisation.client as { surname?: string }).surname,
+        subject?.make,
+        subject?.model,
+        subject?.calibre,
+        subject?.serialNumber,
+      ].filter(Boolean).join('_'))
+    : '';
+  const storedFileName = `${timestamp}_${personalisedPrefix ? `${personalisedPrefix}_` : ''}${sanitiseFileName(
     input.item.fileName
   )}`;
   const storagePath = [
@@ -143,7 +162,9 @@ export async function addReferenceDocumentToClient(
       is_verified: false,
       is_generated: false,
       notes:
-        'Working copy selected from the LicenceGuard Reference Library. The original reference file remains unchanged.',
+        input.personalisation
+          ? 'Application working copy selected automatically. Client, firearm and application replacement values are attached in metadata for controlled personalisation. The original reference file remains unchanged.'
+          : 'Working copy selected from the LicenceGuard Reference Library. The original reference file remains unchanged.',
       metadata: {
         source: 'REFERENCE_LIBRARY',
         referenceLibraryId: input.item.id,
@@ -153,6 +174,10 @@ export async function addReferenceDocumentToClient(
         referenceCategory: input.item.category,
         referenceApplicationFolder:
           input.item.applicationFolder,
+        workingCopyStatus: input.personalisation
+          ? 'PERSONALISATION_CONTEXT_ATTACHED'
+          : 'REFERENCE_COPY',
+        personalisation: input.personalisation ?? null,
       },
       created_by: input.userId,
       updated_by: input.userId,
