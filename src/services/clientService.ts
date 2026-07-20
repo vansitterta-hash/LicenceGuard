@@ -121,7 +121,7 @@ export async function getClientProfileSummary(
       .eq('client_id', clientId),
 
     supabase
-      .from('renewal_cases')
+      .from('application_cases')
       .select('id', { count: 'exact', head: true })
       .eq('client_id', clientId)
       .not('status', 'in', '("APPROVED","DECLINED","CLOSED")'),

@@ -559,7 +559,25 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
                 style={styles.textArea}
               />
               <View style={styles.inlineActions}>
-                <Button variant="secondary" title="Open Reference Library" onPress={() => navigation.navigate('ReferenceLibrary')} />
+                <Button
+                  variant="secondary"
+                  title="Add motivation from Reference Library"
+                  onPress={() =>
+                    navigation.navigate('ReferenceLibrary', {
+                      clientId: route.params.clientId,
+                      applicationCaseId:
+                        route.params.applicationCaseId,
+                      documentType: 'MOTIVATION',
+                      query: [
+                        selectedFirearm?.calibre,
+                        selectedFirearm?.make,
+                      ]
+                        .filter(Boolean)
+                        .join(' '),
+                      selectionMode: true,
+                    })
+                  }
+                />
                 <Button variant="secondary" title="Open client documents" onPress={() => navigation.navigate('DocumentLibrary', { clientId: route.params.clientId })} />
               </View>
             </Card>

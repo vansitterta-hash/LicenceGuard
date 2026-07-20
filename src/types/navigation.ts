@@ -3,7 +3,15 @@ import type { CompetencyCategory } from './competency';
 export type RootStackParamList = {
   Dashboard: undefined;
 
-  ReferenceLibrary: undefined;
+  ReferenceLibrary:
+    | {
+        clientId?: string;
+        applicationCaseId?: string;
+        documentType?: import('./document').DocumentType;
+        query?: string;
+        selectionMode?: boolean;
+      }
+    | undefined;
 
   Clients: undefined;
 

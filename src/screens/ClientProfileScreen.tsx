@@ -194,7 +194,8 @@ export default function ClientProfileScreen({
 
   const { client, readiness } = profile;
   const readinessVisual = getReadinessVisual(
-    readiness.status
+    readiness.status,
+    readiness.renewalDue
   );
 
   return (
@@ -321,7 +322,9 @@ export default function ClientProfileScreen({
 
             <View style={styles.readinessText}>
               <Text style={styles.readinessEyebrow}>
-                RENEWAL READINESS
+                {readiness.renewalDue
+                  ? 'RENEWAL READINESS'
+                  : 'LICENCE MONITORING'}
               </Text>
 
               <Text
@@ -354,7 +357,9 @@ export default function ClientProfileScreen({
             </Text>
 
             <Text style={styles.scoreLabel}>
-              readiness score
+              {readiness.renewalDue
+                ? 'readiness score'
+                : 'record health'}
             </Text>
           </View>
         </View>
@@ -787,12 +792,15 @@ function StatusBadge({
 }
 
 function getReadinessVisual(
-  status: ReadinessStatus
+  status: ReadinessStatus,
+  renewalDue: boolean
 ) {
   switch (status) {
     case 'READY':
       return {
-        label: 'Renewal ready',
+        label: renewalDue
+          ? 'Renewal ready'
+          : 'No renewal currently due',
         color: Colors.success,
         borderColor: Colors.success,
         backgroundColor:

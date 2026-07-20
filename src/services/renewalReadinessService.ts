@@ -60,6 +60,7 @@ export type RenewalReadiness = {
   status: ReadinessStatus;
   score: number;
   nextAction: string;
+  renewalDue: boolean;
   issues: ReadinessIssue[];
   warnings: ReadinessIssue[];
   competencies: CompetencyReadinessItem[];
@@ -208,7 +209,7 @@ export async function getRenewalReadiness(
       .eq('client_id', clientId),
 
     supabase
-      .from('renewal_cases')
+      .from('application_cases')
       .select('id', {
         count: 'exact',
         head: true,
@@ -456,9 +457,18 @@ export async function getRenewalReadiness(
     ).values()
   );
 
+  const renewalDue = licences.some(
+    (licence) =>
+      licence.daysUntilExpiry <= 120 ||
+      licence.status === 'EXPIRING' ||
+      licence.status === 'EXPIRED' ||
+      licence.status === 'RENEWAL_IN_PROGRESS'
+  );
+
   let status: ReadinessStatus = 'READY';
-  let nextAction =
-    'Review the client record and prepare the next renewal when due.';
+  let nextAction = renewalDue
+    ? 'Review the outstanding renewal requirements and prepare the application.'
+    : 'No firearm licence renewal is currently due within the next 120 days.';
 
   if (
     firearmRows.length === 0 &&
@@ -499,6 +509,7 @@ export async function getRenewalReadiness(
     status,
     score,
     nextAction,
+    renewalDue,
     issues: uniqueIssues,
     warnings: uniqueWarnings,
     competencies,
