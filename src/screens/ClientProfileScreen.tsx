@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   TriangleAlert,
   UserRound,
+  ChevronRight,
 } from 'lucide-react-native';
 
 import Button from '../components/Button';
@@ -36,6 +37,7 @@ import {
   archiveClient,
   getClientProfileSummary,
 } from '../services/clientService';
+import { listClientApplicationCases } from '../services/applicationCaseService';
 import {
   getRenewalReadiness,
   type ReadinessIssue,
@@ -47,6 +49,11 @@ import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ClientProfileSummary } from '../types/client';
+import {
+  getApplicationCaseStatusLabel,
+  getApplicationCaseTypeLabel,
+  type ApplicationCaseListItem,
+} from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<
@@ -57,6 +64,7 @@ type Props = NativeStackScreenProps<
 type ProfileData = {
   client: ClientProfileSummary;
   readiness: RenewalReadiness;
+  applications: ApplicationCaseListItem[];
 };
 
 export default function ClientProfileScreen({
@@ -77,14 +85,16 @@ export default function ClientProfileScreen({
     setLoading(true);
 
     try {
-      const [client, readiness] = await Promise.all([
+      const [client, readiness, applications] = await Promise.all([
         getClientProfileSummary(route.params.clientId),
         getRenewalReadiness(route.params.clientId),
+        listClientApplicationCases(route.params.clientId),
       ]);
 
       setProfile({
         client,
         readiness,
+        applications,
       });
     } catch (error) {
       Alert.alert(
@@ -193,6 +203,7 @@ export default function ClientProfileScreen({
   }
 
   const { client, readiness } = profile;
+  const openApplications = profile.applications.filter((applicationCase) => applicationCase.isOpen);
   const readinessVisual = getReadinessVisual(
     readiness.status,
     readiness.renewalDue
@@ -310,6 +321,39 @@ export default function ClientProfileScreen({
             title="Competency Renewal"
           />
         </View>
+      </Card>
+
+      <Card
+        subtitle="Continue saved work without creating the application again."
+        title="Applications in progress"
+      >
+        {openApplications.length === 0 ? (
+          <View style={styles.applicationEmpty}>
+            <FileCheck2 color={Colors.silverDark} size={28} />
+            <Text style={styles.applicationEmptyTitle}>No applications in progress</Text>
+            <Text style={styles.applicationEmptyText}>Start one of the application actions above. LicenceGuard saves it as a working application automatically.</Text>
+          </View>
+        ) : (
+          <View style={styles.applicationList}>
+            {openApplications.map((applicationCase) => (
+              <Pressable
+                key={applicationCase.id}
+                onPress={() => navigation.navigate('ApplicationReadiness', { clientId: client.id, applicationCaseId: applicationCase.id })}
+                style={({ pressed }) => [styles.applicationRow, pressed ? styles.applicationRowPressed : null]}
+              >
+                <View style={styles.applicationRowMain}>
+                  <Text style={styles.applicationRowTitle}>{getApplicationCaseTypeLabel(applicationCase.application_type)}</Text>
+                  <Text style={styles.applicationRowSubject}>{applicationCase.subjectDescription}</Text>
+                  <Text style={styles.applicationRowStatus}>{getApplicationCaseStatusLabel(applicationCase.status)} · {applicationCase.progress_percent}% complete</Text>
+                </View>
+                <View style={styles.applicationContinue}>
+                  <Text style={styles.applicationContinueText}>Continue</Text>
+                  <ChevronRight color={Colors.primaryLight} size={18} />
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </Card>
 
       <Card
@@ -1085,6 +1129,66 @@ const styles = StyleSheet.create({
   },
   headerActionsCompact: {
     flexDirection: 'column',
+  },
+  applicationList: {
+    gap: Spacing.sm,
+  },
+  applicationRow: {
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+  },
+  applicationRowPressed: {
+    opacity: 0.78,
+  },
+  applicationRowMain: {
+    flex: 1,
+    paddingRight: Spacing.md,
+  },
+  applicationRowTitle: {
+    ...Typography.bodyStrong,
+    color: Colors.text,
+  },
+  applicationRowSubject: {
+    ...Typography.body,
+    color: Colors.silver,
+    marginTop: Spacing.xxs,
+  },
+  applicationRowStatus: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+  },
+  applicationContinue: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  applicationContinueText: {
+    ...Typography.caption,
+    color: Colors.primaryLight,
+    fontWeight: '800',
+  },
+  applicationEmpty: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+  },
+  applicationEmptyTitle: {
+    ...Typography.bodyStrong,
+    color: Colors.silver,
+    marginTop: Spacing.sm,
+  },
+  applicationEmptyText: {
+    ...Typography.body,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
+    maxWidth: 600,
+    textAlign: 'center',
   },
   readinessCard: {
     marginBottom: Spacing.lg,

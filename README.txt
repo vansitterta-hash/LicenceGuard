@@ -1,16 +1,22 @@
-LicenceGuard Application Orchestrator
+LICENCEGUARD BATCH 5 — PERSISTENT APPLICATION WORKSPACE
 
-Complete replacement files:
-- src/screens/ApplicationReadinessScreen.tsx
-- src/services/applicationOrchestratorService.ts
+This package adds:
+- persistent application progress and last-updated information
+- visible Save Draft with saved timestamp
+- direct Upload Documents and View Application Documents actions
+- actionable outstanding-document rows
+- motivation and firearm-information previews
+- application timeline
+- activity recording for draft saves and compilation attempts
+- safe fallback timeline before the optional database migration is applied
 
-This update turns Compile Application Pack into a single coordinated action. LicenceGuard will:
-1. select calibre-compatible motivation and firearm-information documents;
-2. attach working copies without changing the source library;
-3. auto-complete and archive the official SAPS PDF when captured data permits;
-4. prepare the application pack manifest;
-5. generate, archive and download the final PDF when all blocking requirements are satisfied;
-6. report only the remaining blockers when the pack is not yet ready.
+INSTALL
+1. Extract this ZIP into C:\Users\BM\Desktop\LicenceGuardDesk with -Force.
+2. Run npm run tsc.
+3. Apply supabase/migrations/20260720_application_workspace_events.sql in Supabase SQL Editor.
+   The screen works without the migration, but the migration enables the full persistent timeline.
+4. Test on localhost.
+5. Commit only after the compile and workflow test are clean.
 
-After extraction run:
-npm run tsc
+PUBLIC LIBRARY GOVERNANCE (LOCKED FOR FUTURE BUILD)
+Any public submission must be converted to a skeletal reference copy and reviewed before publication. Remove names, surnames, identity/passport numbers, addresses, email addresses, contact numbers, signatures, initials, application references, invoice references, firearm makes/models/calibres where client-specific, serial numbers, licence numbers, dealer/private-seller personal details, QR codes, barcodes and hidden document metadata that can identify the contributor or their client. The private original must never be altered or published.

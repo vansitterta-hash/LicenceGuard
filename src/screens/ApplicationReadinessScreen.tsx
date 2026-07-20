@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -14,9 +15,14 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Eye,
   FileOutput,
+  FolderOpen,
   Pencil,
+  Save,
   Sparkles,
+  Clock3,
+  History,
   Upload,
 } from 'lucide-react-native';
 
@@ -29,6 +35,15 @@ import {
   type ApplicationDocumentSuggestion,
 } from '../services/applicationDocumentSuggestionService';
 import { orchestrateApplicationPack } from '../services/applicationOrchestratorService';
+import {
+  getApplicationWorkspaceMeta,
+  listApplicationWorkspaceEvents,
+  recordApplicationWorkspaceEvent,
+  saveApplicationDraft,
+  type ApplicationWorkspaceEvent,
+  type ApplicationWorkspaceMeta,
+} from '../services/applicationWorkspaceService';
+import { buildReferenceLibraryUrl } from '../services/referenceLibraryService';
 import { getClientApplicationReadiness } from '../services/applicationReadinessService';
 import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
@@ -49,6 +64,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const [suggestionResult, setSuggestionResult] = useState<SuggestionResult | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [workspaceMeta, setWorkspaceMeta] = useState<ApplicationWorkspaceMeta | null>(null);
+  const [timeline, setTimeline] = useState<ApplicationWorkspaceEvent[]>([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -99,6 +118,22 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     void loadSuggestions();
   }, [loadSuggestions]);
 
+  const loadWorkspace = useCallback(async () => {
+    if (!applicationCase?.caseId) return;
+    try {
+      const meta = await getApplicationWorkspaceMeta(applicationCase.caseId);
+      setWorkspaceMeta(meta);
+      setLastSavedAt(meta.updatedAt);
+      setTimeline(await listApplicationWorkspaceEvents(applicationCase.caseId, meta));
+    } catch (error) {
+      Alert.alert('Unable to load application workspace', error instanceof Error ? error.message : 'An unknown error occurred.');
+    }
+  }, [applicationCase?.caseId]);
+
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
+
   const compileApplicationPack = async () => {
     if (!dealerProfile?.dealerId || !user?.id || !applicationCase) {
       Alert.alert('Unable to compile application', 'The signed-in dealer or application context is missing.');
@@ -128,8 +163,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         );
       }
 
+      await recordApplicationWorkspaceEvent(applicationCase.caseId, user.id, result.packGenerated ? 'PACK_COMPILED' : 'PACK_CHECKED', result.packGenerated ? 'Application pack compiled' : 'Application pack checked', result.blockingReasons.join(' | ') || null);
       await loadData();
       await loadSuggestions();
+      await loadWorkspace();
     } catch (error) {
       Alert.alert(
         'Unable to compile application',
@@ -139,6 +176,32 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       setCompiling(false);
     }
   };
+
+  const saveDraft = useCallback(async () => {
+    if (!applicationCase?.caseId || !user?.id) return;
+    setSaving(true);
+    try {
+      const savedAt = await saveApplicationDraft(applicationCase.caseId, user.id);
+      setLastSavedAt(savedAt);
+      Alert.alert('Application saved', 'This application is saved and can be continued from the client profile.');
+    } catch (error) {
+      Alert.alert('Unable to save application', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      setSaving(false);
+    }
+      await loadWorkspace();
+  }, [applicationCase?.caseId, user?.id, loadWorkspace]);
+
+  const openReferenceDocument = useCallback(async (suggestion: ApplicationDocumentSuggestion) => {
+    try {
+      const url = buildReferenceLibraryUrl(suggestion.item.relativePath);
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) throw new Error('This device cannot open the selected document.');
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert('Unable to open document', error instanceof Error ? error.message : 'An unknown error occurred.');
+    }
+  }, []);
 
   if (loading || !data) {
     return (
@@ -175,13 +238,26 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   return (
     <Screen maxWidth={920}>
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>APPLICATION CHECK</Text>
+        <Text style={styles.eyebrow}>APPLICATION WORKSPACE</Text>
         <Text style={styles.title}>{getApplicationCaseTypeLabel(applicationCase.applicationType)}</Text>
         <Text style={styles.subject}>{applicationCase.subject}</Text>
         <Text style={styles.subtitle}>
-          LicenceGuard has checked the client, firearm, competency, licence and uploaded documents automatically.
+          Everything for this application is saved here. Continue, upload, review, compile and return later without recreating the application.
         </Text>
       </View>
+
+      <Card title="Application progress" subtitle={workspaceMeta ? `Last updated ${new Date(workspaceMeta.updatedAt).toLocaleString()}` : 'Loading saved application status...'}>
+        <View style={styles.progressHeader}>
+          <View>
+            <Text style={styles.progressLabel}>{workspaceMeta?.status.replace(/_/g, ' ') ?? applicationCase.status.replace(/_/g, ' ')}</Text>
+            <Text style={styles.progressHint}>This is a persistent working application.</Text>
+          </View>
+          <Text style={styles.progressPercent}>{Math.max(workspaceMeta?.progressPercent ?? applicationCase.score, applicationCase.score)}%</Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.max(workspaceMeta?.progressPercent ?? applicationCase.score, applicationCase.score)}%` }]} />
+        </View>
+      </Card>
 
       <Card padding="large" style={[styles.statusCard, ready ? styles.readyBorder : styles.actionBorder]}>
         <View style={styles.statusRow}>
@@ -201,6 +277,23 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         </View>
       </Card>
 
+      <Card title="Application workspace" subtitle="Your work is stored against this application. Continue it from the client profile at any time.">
+        <View style={styles.workspaceStatus}>
+          <View style={styles.workspaceSaved}>
+            <Save color={Colors.success} size={20} />
+            <View style={styles.workspaceSavedText}>
+              <Text style={styles.workspaceSavedTitle}>Saved application</Text>
+              <Text style={styles.workspaceSavedDetail}>{lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleString()}` : 'Changes are stored when application details and documents are added.'}</Text>
+            </View>
+          </View>
+          <Button title={saving ? 'Saving...' : 'Save Draft'} variant="secondary" disabled={saving} onPress={() => void saveDraft()} leftIcon={<Save color={Colors.silver} size={18} />} />
+        </View>
+        <View style={styles.workspaceButtons}>
+          <Button title="Upload Documents" onPress={() => navigation.navigate('DocumentLibrary', { clientId: route.params.clientId, applicationCaseId: applicationCase.caseId, openUpload: true })} leftIcon={<Upload color={Colors.white} size={18} />} />
+          <Button title="View Application Documents" variant="secondary" onPress={() => navigation.navigate('DocumentLibrary', { clientId: route.params.clientId, applicationCaseId: applicationCase.caseId })} leftIcon={<FolderOpen color={Colors.silver} size={18} />} />
+        </View>
+      </Card>
+
       {applicationCase.firearmId ? (
         <Card
           title="Suggested application documents"
@@ -214,7 +307,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
           ) : hasSuggestions ? (
             <View style={styles.suggestionContent}>
               {motivationSuggestions.length > 0 ? (
-                <SuggestionGroup title="Motivations" items={motivationSuggestions} />
+                <SuggestionGroup title="Motivations" items={motivationSuggestions} onView={openReferenceDocument} />
               ) : (
                 <View style={styles.noMatch}>
                   <AlertTriangle color={Colors.warning} size={18} />
@@ -223,7 +316,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
               )}
 
               {informationSuggestions.length > 0 ? (
-                <SuggestionGroup title="Firearm and calibre information" items={informationSuggestions} />
+                <SuggestionGroup title="Firearm and calibre information" items={informationSuggestions} onView={openReferenceDocument} />
               ) : null}
 
               <Text style={styles.helperText}>
@@ -267,6 +360,26 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
           </View>
         </Card>
       ) : null}
+
+      <Card title="Application timeline" subtitle="A simple history of work completed on this application.">
+        <View style={styles.timelineList}>
+          {timeline.length > 0 ? timeline.map((event) => (
+            <View key={event.id} style={styles.timelineRow}>
+              <View style={styles.timelineIcon}><History color={Colors.primaryLight} size={16} /></View>
+              <View style={styles.timelineText}>
+                <Text style={styles.timelineTitle}>{event.title}</Text>
+                {event.detail ? <Text style={styles.timelineDetail}>{event.detail}</Text> : null}
+                <Text style={styles.timelineDate}>{new Date(event.createdAt).toLocaleString()}</Text>
+              </View>
+            </View>
+          )) : (
+            <View style={styles.timelineRow}>
+              <View style={styles.timelineIcon}><Clock3 color={Colors.silverDark} size={16} /></View>
+              <Text style={styles.mutedLeft}>Activity will appear here as the application is worked on.</Text>
+            </View>
+          )}
+        </View>
+      </Card>
 
       <View style={styles.actions}>
         <Button
@@ -313,7 +426,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 }
 
-function SuggestionGroup({ title, items }: { title: string; items: ApplicationDocumentSuggestion[] }) {
+function SuggestionGroup({ title, items, onView }: { title: string; items: ApplicationDocumentSuggestion[]; onView: (item: ApplicationDocumentSuggestion) => void }) {
   return (
     <View style={styles.suggestionGroup}>
       <View style={styles.suggestionGroupTitleRow}>
@@ -327,6 +440,10 @@ function SuggestionGroup({ title, items }: { title: string; items: ApplicationDo
             <Text style={styles.suggestionTitle}>{suggestion.item.title}</Text>
             <Text style={styles.suggestionReason}>{suggestion.reason}</Text>
           </View>
+          <Pressable onPress={() => onView(suggestion)} style={({ pressed }) => [styles.viewDocumentButton, pressed ? styles.pressed : null]}>
+            <Eye color={Colors.primaryLight} size={17} />
+            <Text style={styles.viewDocumentText}>View</Text>
+          </Pressable>
         </View>
       ))}
     </View>
@@ -370,6 +487,12 @@ const styles = StyleSheet.create({
   statusText: { flex: 1 },
   statusTitle: { ...Typography.sectionTitle },
   statusDetail: { ...Typography.body, color: Colors.textMuted, marginTop: Spacing.xs },
+  workspaceStatus: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, justifyContent: 'space-between' },
+  workspaceSaved: { alignItems: 'center', flexDirection: 'row', flex: 1, gap: Spacing.sm, minWidth: 260 },
+  workspaceSavedText: { flex: 1 },
+  workspaceSavedTitle: { ...Typography.bodyStrong, color: Colors.success },
+  workspaceSavedDetail: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
+  workspaceButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, marginTop: Spacing.lg },
   suggestionLoading: { alignItems: 'center', flexDirection: 'row', gap: Spacing.md, paddingVertical: Spacing.md },
   suggestionContent: { gap: Spacing.lg },
   suggestionGroup: { gap: Spacing.sm },
@@ -379,6 +502,8 @@ const styles = StyleSheet.create({
   suggestionRank: { alignItems: 'center', backgroundColor: Colors.primarySoft, borderRadius: Radius.md, height: 28, justifyContent: 'center', width: 28 },
   suggestionRankText: { ...Typography.caption, color: Colors.primaryLight, fontWeight: '800' },
   suggestionText: { flex: 1 },
+  viewDocumentButton: { alignItems: 'center', borderColor: Colors.primaryDark, borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: Spacing.xs, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs },
+  viewDocumentText: { ...Typography.caption, color: Colors.primaryLight, fontWeight: '800' },
   suggestionTitle: { ...Typography.bodyStrong, color: Colors.text },
   suggestionReason: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
   noMatch: { alignItems: 'flex-start', backgroundColor: Colors.surfaceRaised, borderColor: Colors.warning, borderRadius: Radius.lg, borderWidth: 1, flexDirection: 'row', gap: Spacing.sm, padding: Spacing.md },
@@ -399,5 +524,18 @@ const styles = StyleSheet.create({
   completedList: { borderTopColor: Colors.border, borderTopWidth: 1, gap: Spacing.sm, marginTop: Spacing.sm, padding: Spacing.md },
   completedRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.sm },
   completedLabel: { ...Typography.body, color: Colors.textMuted },
+  progressHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.md },
+  progressLabel: { ...Typography.bodyStrong, color: Colors.text, textTransform: 'capitalize' },
+  progressHint: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
+  progressPercent: { ...Typography.sectionTitle, color: Colors.primaryLight },
+  progressTrack: { backgroundColor: Colors.surfaceSoft, borderRadius: Radius.xl, height: 10, marginTop: Spacing.md, overflow: 'hidden' },
+  progressFill: { backgroundColor: Colors.primary, borderRadius: Radius.xl, height: '100%' },
+  timelineList: { gap: Spacing.md },
+  timelineRow: { alignItems: 'flex-start', flexDirection: 'row', gap: Spacing.md },
+  timelineIcon: { alignItems: 'center', backgroundColor: Colors.primarySoft, borderRadius: Radius.xl, height: 34, justifyContent: 'center', width: 34 },
+  timelineText: { flex: 1 },
+  timelineTitle: { ...Typography.bodyStrong, color: Colors.text },
+  timelineDetail: { ...Typography.caption, color: Colors.textMuted, marginTop: Spacing.xxs },
+  timelineDate: { ...Typography.caption, color: Colors.silverDark, marginTop: Spacing.xxs },
   pressed: { opacity: 0.75 },
 });
