@@ -1,7 +1,6 @@
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +20,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import LicenceGuardLogo from '../components/LicenceGuardLogo';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import { Colors } from '../theme/colors';
@@ -28,8 +28,6 @@ import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { RootStackParamList } from '../types/navigation';
-
-const licenceGuardLogo = require('../../assets/LicenceGuard Logo.png');
 
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -106,14 +104,7 @@ export default function DashboardScreen({
         ]}
       >
         <View style={styles.brandBlock}>
-          <View style={styles.logoFrame}>
-            <Image
-              accessibilityLabel="LicenceGuard"
-              resizeMode="contain"
-              source={licenceGuardLogo}
-              style={styles.logo}
-            />
-          </View>
+          <LicenceGuardLogo style={styles.logo} width={96} />
 
           <View style={styles.brandText}>
             <Text style={styles.brandName}>
@@ -302,20 +293,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexShrink: 1,
   },
-  logoFrame: {
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.primaryDark,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    height: 76,
-    justifyContent: 'center',
-    overflow: 'hidden',
-    width: 76,
-  },
   logo: {
-    height: 72,
-    width: 72,
+    flexShrink: 0,
   },
   brandText: {
     flexShrink: 1,

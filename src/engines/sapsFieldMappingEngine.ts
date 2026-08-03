@@ -18,7 +18,10 @@ function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, v
     case 'application.section17': return sectionFlag(section, '17');
     case 'application.section19': return sectionFlag(section, '19');
     case 'application.section20': return sectionFlag(section, '20');
+    case 'application.type': return data.application.applicationType;
+    case 'application.openedDate': return data.application.openedDate;
     case 'applicant.firstNames': return values.firstName;
+    case 'applicant.fullName': return data.applicant.fullName;
     case 'applicant.surname': return values.surname;
     case 'applicant.idNumber': return values.idNumber;
     case 'applicant.residentialAddress': return values.residentialAddress;
@@ -34,8 +37,13 @@ function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, v
     case 'firearm.model': return values.firearmModel;
     case 'firearm.calibre': return values.calibre;
     case 'firearm.serialNumber': return values.serialNumber;
+    case 'licence.number': return values.licenceNumber;
+    case 'licence.issueDate': return data.firearm?.licenceIssueDate ?? '';
+    case 'licence.expiryDate': return data.firearm?.licenceExpiryDate ?? '';
     case 'competency.category': return values.competencyCategory;
     case 'competency.certificateNumber': return values.competencyCertificateNumber;
+    case 'competency.issueDate': return data.competency?.issueDate ?? '';
+    case 'competency.expiryDate': return data.competency?.expiryDate ?? '';
     case 'supplier.source': return data.supplier?.acquisitionSource ?? '';
     case 'supplier.name': return values.supplierName;
     case 'supplier.idOrRegistration': return values.supplierIdOrRegistration;

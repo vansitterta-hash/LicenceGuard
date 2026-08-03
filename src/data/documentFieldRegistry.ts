@@ -1,11 +1,14 @@
 import type { DocumentFieldDefinition, DocumentFieldId } from '../types/documentEngine';
 
 const FIELDS: DocumentFieldDefinition[] = [
+  { id: 'application.type', label: 'Application type', dataType: 'CHOICE', sourcePath: 'data.application.applicationType', normalise: 'TRIM' },
   { id: 'application.section', label: 'Licence section', dataType: 'TEXT', sourcePath: 'review.licenceSection', normalise: 'SECTION_NUMBER' },
   { id: 'application.policeStation', label: 'Police station / DFO', dataType: 'TEXT', sourcePath: 'review.policeStation', normalise: 'TRIM' },
   { id: 'application.reference', label: 'Application reference', dataType: 'TEXT', sourcePath: 'review.applicationReference', normalise: 'TRIM' },
+  { id: 'application.openedDate', label: 'Application opened date', dataType: 'DATE', sourcePath: 'data.application.openedDate', normalise: 'TRIM' },
   { id: 'application.motivationSummary', label: 'Motivation summary', dataType: 'TEXT', sourcePath: 'review.motivationSummary', normalise: 'TRIM' },
   { id: 'applicant.firstNames', label: 'First names', dataType: 'TEXT', sourcePath: 'review.firstName', normalise: 'TRIM' },
+  { id: 'applicant.fullName', label: 'Full name', dataType: 'TEXT', sourcePath: 'data.applicant.fullName', normalise: 'TRIM' },
   { id: 'applicant.surname', label: 'Surname', dataType: 'TEXT', sourcePath: 'review.surname', normalise: 'UPPERCASE' },
   { id: 'applicant.idNumber', label: 'Identity number', dataType: 'TEXT', sourcePath: 'review.idNumber', normalise: 'DIGITS_ONLY' },
   { id: 'applicant.residentialAddress', label: 'Residential address', dataType: 'TEXT', sourcePath: 'review.residentialAddress', normalise: 'TRIM' },
@@ -22,8 +25,12 @@ const FIELDS: DocumentFieldDefinition[] = [
   { id: 'firearm.calibre', label: 'Calibre', dataType: 'TEXT', sourcePath: 'review.calibre', normalise: 'TRIM' },
   { id: 'firearm.serialNumber', label: 'Serial number', dataType: 'TEXT', sourcePath: 'review.serialNumber', normalise: 'UPPERCASE' },
   { id: 'licence.number', label: 'Existing licence number', dataType: 'TEXT', sourcePath: 'review.licenceNumber', normalise: 'TRIM' },
+  { id: 'licence.issueDate', label: 'Existing licence issue date', dataType: 'DATE', sourcePath: 'data.firearm.licenceIssueDate', normalise: 'TRIM' },
+  { id: 'licence.expiryDate', label: 'Existing licence expiry date', dataType: 'DATE', sourcePath: 'data.firearm.licenceExpiryDate', normalise: 'TRIM' },
   { id: 'competency.category', label: 'Competency category', dataType: 'TEXT', sourcePath: 'review.competencyCategory', normalise: 'TRIM' },
   { id: 'competency.certificateNumber', label: 'Competency certificate number', dataType: 'TEXT', sourcePath: 'review.competencyCertificateNumber', normalise: 'TRIM' },
+  { id: 'competency.issueDate', label: 'Competency issue date', dataType: 'DATE', sourcePath: 'data.competency.issueDate', normalise: 'TRIM' },
+  { id: 'competency.expiryDate', label: 'Competency expiry date', dataType: 'DATE', sourcePath: 'data.competency.expiryDate', normalise: 'TRIM' },
   { id: 'supplier.source', label: 'Acquisition source', dataType: 'TEXT', sourcePath: 'data.supplier.acquisitionSource', normalise: 'TRIM' },
   { id: 'supplier.name', label: 'Supplier / seller name', dataType: 'TEXT', sourcePath: 'review.supplierName', normalise: 'TRIM' },
   { id: 'supplier.idOrRegistration', label: 'Supplier ID / registration', dataType: 'TEXT', sourcePath: 'review.supplierIdOrRegistration', normalise: 'TRIM' },

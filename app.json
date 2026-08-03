@@ -19,7 +19,12 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/LicenceGuard Logo.png"
+      "favicon": "./assets/favicon.png"
+    },
+    "splash": {
+      "backgroundColor": "#090B0E",
+      "image": "./assets/licenceguard-logo-primary.png",
+      "resizeMode": "contain"
     },
     "plugins": [
       "expo-status-bar"

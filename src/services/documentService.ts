@@ -19,7 +19,117 @@ export type DocumentUploadFile = {
   name: string;
   mimeType: string | null;
   size: number | null;
+  webFile?: Blob | null;
 };
+
+type ReusableRequirement = {
+  documentType: DocumentType | null;
+};
+
+type SupabaseOperationResult<T> = {
+  data: T;
+  error: { message: string } | null;
+};
+
+const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
+  'COMPETENCY_APPLICATION',
+  'COMPETENCY_RENEWAL_FORM',
+  'FIREARM_LICENCE_APPLICATION_FORM',
+  'FIREARM_LICENCE_RENEWAL_FORM',
+]);
+const CROSS_CASE_CLIENT_DOCUMENT_TYPES = new Set<DocumentType>([
+  'ID_COPY',
+]);
+
+function metadataCaseIds(metadata: Record<string, unknown>): string[] {
+  const value = metadata.applicationCaseIds;
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+export function documentReferencesApplicationCase(
+  document: DocumentRecord,
+  applicationCaseId: string
+): boolean {
+  return document.application_case_id === applicationCaseId
+    || metadataCaseIds(document.metadata ?? {}).includes(applicationCaseId);
+}
+
+export async function linkReusableClientDocumentsToApplicationCase(input: {
+  applicationCaseId: string;
+  userId: string;
+  documents: DocumentRecord[];
+  requirements: ReusableRequirement[];
+}): Promise<number> {
+  const requiredTypes = new Set(
+    input.requirements
+      .map((requirement) => requirement.documentType)
+      .filter((documentType): documentType is DocumentType =>
+        Boolean(documentType) && !GENERATED_APPLICATION_FORM_TYPES.has(documentType as DocumentType)
+      )
+  );
+  const now = new Date().toISOString().slice(0, 10);
+  const reusable = Array.from(requiredTypes)
+    .map((documentType) =>
+      input.documents
+        .filter((document) =>
+          document.document_type === documentType
+          && document.lifecycle_status === 'ACTIVE'
+          && (
+            (document.document_scope === 'CLIENT' && !document.application_case_id)
+            || CROSS_CASE_CLIENT_DOCUMENT_TYPES.has(document.document_type)
+          )
+          && (!document.expiry_date || document.expiry_date >= now)
+          && !documentReferencesApplicationCase(document, input.applicationCaseId)
+        )
+        .sort((left, right) => {
+          if (left.is_verified !== right.is_verified) return left.is_verified ? -1 : 1;
+          return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+        })[0]
+    )
+    .filter((document): document is DocumentRecord => Boolean(document));
+
+  for (const document of reusable) {
+    const applicationCaseIds = [
+      ...metadataCaseIds(document.metadata ?? {}),
+      input.applicationCaseId,
+    ];
+    const result = await withTimeout<SupabaseOperationResult<unknown>>(
+      db.from('documents').update({
+          metadata: {
+            ...(document.metadata ?? {}),
+            applicationCaseIds,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', document.id),
+      30_000,
+      `Linking the existing ${document.document_type} document to the application timed out.`
+    );
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  return reusable.length;
+}
+
+async function withTimeout<T>(
+  operation: PromiseLike<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(operation),
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 export type UploadClientDocumentInput = {
   dealerId: string;
@@ -86,9 +196,11 @@ export async function listClientDocuments(
     query = query.eq('lifecycle_status', 'ACTIVE');
   }
 
-  const result = await query.order('created_at', {
-    ascending: false,
-  });
+  const result = await withTimeout<SupabaseOperationResult<DocumentRecord[]>>(
+    query.order('created_at', { ascending: false }),
+    30_000,
+    'Loading the client document library timed out.'
+  );
 
   if (result.error) {
     throw new Error(result.error.message);
@@ -132,6 +244,12 @@ export async function listDocumentTemplates(): Promise<
 export async function uploadClientDocument(
   input: UploadClientDocumentInput
 ): Promise<DocumentRecord> {
+  if (input.documentType === 'PASSPORT_PHOTO') {
+    throw new Error(
+      'Passport photographs are physical submission items and are not stored in LicenceGuard.'
+    );
+  }
+  let stage = 'file-ready';
   const timestamp = new Date()
     .toISOString()
     .replace(/[:.]/g, '-');
@@ -147,33 +265,41 @@ export async function uploadClientDocument(
     storedFileName,
   ].join('/');
 
-  const fileResponse = await fetch(input.file.uri);
+  let fileBlob = input.file.webFile ?? null;
+  if (!fileBlob) {
+    stage = 'file-read-fallback';
+    const controller = new AbortController();
+    const readTimeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const fileResponse = await fetch(input.file.uri, { signal: controller.signal });
+      if (!fileResponse.ok) {
+        throw new Error(`LicenceGuard could not read the selected document (${fileResponse.status}).`);
+      }
+      fileBlob = await fileResponse.blob();
+    } catch (error) {
+      throw new Error(
+        `LicenceGuard could not read the selected document. ${
+          error instanceof Error ? error.message : 'The browser file read failed.'
+        }`
+      );
+    } finally {
+      clearTimeout(readTimeout);
+    }
+  }
 
-  if (!fileResponse.ok) {
-    throw new Error(
-      'LicenceGuard could not read the selected document.'
+  try {
+    stage = 'storage-start';
+    const uploadResult = await withTimeout<SupabaseOperationResult<unknown>>(
+      db.storage.from(DOCUMENT_BUCKET).upload(storagePath, fileBlob, {
+        contentType: input.file.mimeType || fileBlob.type || 'application/octet-stream',
+        upsert: false,
+      }),
+      60_000,
+      'The document storage upload timed out. Check the connection and try again.'
     );
-  }
+    if (uploadResult.error) throw uploadResult.error;
 
-  const fileBlob = await fileResponse.blob();
-
-  const uploadResult = await db.storage
-    .from(DOCUMENT_BUCKET)
-    .upload(storagePath, fileBlob, {
-      contentType:
-        input.file.mimeType ||
-        fileBlob.type ||
-        'application/octet-stream',
-      upsert: false,
-    });
-
-  if (uploadResult.error) {
-    throw new Error(uploadResult.error.message);
-  }
-
-  const insertResult = await db
-    .from('documents')
-    .insert({
+    const insertPayload = {
       dealer_id: input.dealerId,
       client_id: input.clientId,
       competency_id: null,
@@ -201,21 +327,35 @@ export async function uploadClientDocument(
       is_generated: false,
       notes: emptyToNull(input.notes),
       metadata: {},
-      created_by: input.userId,
-      updated_by: input.userId,
-    })
-    .select('*')
-    .single();
-
-  if (insertResult.error) {
-    await db.storage
-      .from(DOCUMENT_BUCKET)
-      .remove([storagePath]);
-
-    throw new Error(insertResult.error.message);
+      uploaded_by: input.userId,
+    };
+    stage = 'insert-start';
+    const insertResult = await withTimeout<SupabaseOperationResult<DocumentRecord>>(
+      db.from('documents').insert(insertPayload).select('*').single(),
+      30_000,
+      'The document was uploaded, but saving its LicenceGuard record timed out.'
+    );
+    if (insertResult.error) throw insertResult.error;
+    return insertResult.data;
+  } catch (error) {
+    if (stage === 'insert-start') {
+      try {
+        await withTimeout(
+          db.storage.from(DOCUMENT_BUCKET).remove([storagePath]),
+          10_000,
+          'Storage cleanup timed out.'
+        );
+      } catch {
+        // Preserve the original upload failure if cleanup also fails.
+      }
+    }
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error && 'message' in error
+        ? String(error.message)
+        : 'The document upload failed.';
+    throw new Error(`${stage}: ${message}`);
   }
-
-  return insertResult.data as DocumentRecord;
 }
 
 export async function archiveDocument(
@@ -234,7 +374,6 @@ export async function archiveDocument(
       archive_reason:
         cleanedReason ||
         'Archived from the LicenceGuard Document Library.',
-      updated_by: userId,
       updated_at: new Date().toISOString(),
     })
     .eq('id', documentId);
@@ -253,7 +392,8 @@ export async function setDocumentVerified(
     .from('documents')
     .update({
       is_verified: verified,
-      updated_by: userId,
+      verified_at: verified ? new Date().toISOString() : null,
+      verified_by: verified ? userId : null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', documentId);

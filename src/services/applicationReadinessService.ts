@@ -9,9 +9,16 @@ import type {
 import type { ApplicationCaseType } from '../types/applicationCase';
 import type { CompetencyCategory } from '../types/competency';
 import type { DocumentRecord, DocumentType } from '../types/document';
+import { documentReferencesApplicationCase } from './documentService';
 
 const db = supabase as any;
 const DAY_MS = 86_400_000;
+const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
+  'COMPETENCY_APPLICATION',
+  'COMPETENCY_RENEWAL_FORM',
+  'FIREARM_LICENCE_APPLICATION_FORM',
+  'FIREARM_LICENCE_RENEWAL_FORM',
+]);
 
 type ClientRow = { first_name: string; surname: string };
 type CaseRow = {
@@ -59,7 +66,6 @@ type RequirementDefinition = {
 
 const COMMON: RequirementDefinition[] = [
   { key: 'ID_COPY', label: 'Identification copy', detail: 'A clear copy of the client’s identity document.', documentType: 'ID_COPY', required: true },
-  { key: 'PASSPORT_PHOTO', label: 'Passport photographs', detail: 'Current photographs for the application pack.', documentType: 'PASSPORT_PHOTO', required: true },
 ];
 
 const REQUIREMENTS: Partial<Record<ApplicationCaseType, RequirementDefinition[]>> = {
@@ -136,8 +142,41 @@ function documentState(document: DocumentRecord | undefined): RequirementState {
 function stateFor(requirements: ReadinessRequirement[]): ApplicationReadinessState {
   const required = requirements.filter((item) => item.required);
   if (required.some((item) => item.state === 'MISSING' || item.state === 'EXPIRED')) return 'BLOCKED';
-  if (required.some((item) => item.state === 'UNVERIFIED')) return 'ACTION_REQUIRED';
+  if (required.some((item) => item.state === 'UNVERIFIED' || item.state === 'PENDING_GENERATION')) return 'ACTION_REQUIRED';
   return 'READY';
+}
+
+function selectRequirementDocument(
+  documents: DocumentRecord[],
+  documentType: DocumentType | null,
+  applicationCase: CaseRow,
+  firearm: FirearmRow | undefined,
+  licence: LicenceRow | undefined
+): DocumentRecord | undefined {
+  if (!documentType) return undefined;
+  return documents
+    .filter((document) => {
+      if (document.document_type !== documentType) return false;
+      if (
+        document.application_case_id
+        && document.application_case_id !== applicationCase.id
+        && !documentReferencesApplicationCase(document, applicationCase.id)
+      ) return false;
+      return documentReferencesApplicationCase(document, applicationCase.id)
+        || document.document_scope === 'CLIENT'
+        || Boolean(firearm && document.firearm_id === firearm.id)
+        || Boolean(licence && document.firearm_licence_id === licence.id);
+    })
+    .sort((left, right) => {
+      const leftExpired = Boolean(left.expiry_date && daysUntil(left.expiry_date) < 0);
+      const rightExpired = Boolean(right.expiry_date && daysUntil(right.expiry_date) < 0);
+      if (leftExpired !== rightExpired) return leftExpired ? 1 : -1;
+      const leftLinked = documentReferencesApplicationCase(left, applicationCase.id);
+      const rightLinked = documentReferencesApplicationCase(right, applicationCase.id);
+      if (leftLinked !== rightLinked) return leftLinked ? -1 : 1;
+      if (left.is_verified !== right.is_verified) return left.is_verified ? -1 : 1;
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+    })[0];
 }
 
 function sectionExpectedYears(section: string | null): number | null {
@@ -211,14 +250,16 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
           ? 'MISSING'
           : matchingCompetency.verified ? 'SATISFIED' : 'UNVERIFIED';
       } else {
-        const candidates = documents.filter((document) => document.document_type === definition.documentType);
-        const linked = candidates.find((document) =>
-          document.application_case_id === applicationCase.id ||
-          (firearm && document.firearm_id === firearm.id) ||
-          (licence && document.firearm_licence_id === licence.id) ||
-          document.document_scope === 'CLIENT'
-        ) ?? candidates[0];
-        state = documentState(linked);
+        const linked = selectRequirementDocument(
+          documents,
+          definition.documentType,
+          applicationCase,
+          firearm,
+          licence
+        );
+        state = !linked && definition.documentType && GENERATED_APPLICATION_FORM_TYPES.has(definition.documentType)
+          ? 'PENDING_GENERATION'
+          : documentState(linked);
       }
       return { ...definition, state };
     });
@@ -263,7 +304,9 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       readyToGenerate: state === 'READY',
       requirements,
       missingCount: requirements.filter((item) => item.required && (item.state === 'MISSING' || item.state === 'EXPIRED')).length,
-      warningCount: requirements.filter((item) => item.required && item.state === 'UNVERIFIED').length,
+      warningCount: requirements.filter((item) =>
+        item.required && (item.state === 'UNVERIFIED' || item.state === 'PENDING_GENERATION')
+      ).length,
     };
   });
 

@@ -179,8 +179,7 @@ export async function addReferenceDocumentToClient(
           : 'REFERENCE_COPY',
         personalisation: input.personalisation ?? null,
       },
-      created_by: input.userId,
-      updated_by: input.userId,
+      uploaded_by: input.userId,
     })
     .select('*')
     .single();

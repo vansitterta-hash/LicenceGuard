@@ -2,7 +2,12 @@ import { supabase } from '../lib/supabase';
 import { getClientApplicationReadiness } from './applicationReadinessService';
 import { getApplicationCase } from './applicationCaseService';
 import { getClient } from './clientService';
-import { createDocumentSignedUrl, listClientDocuments } from './documentService';
+import {
+  createDocumentSignedUrl,
+  documentReferencesApplicationCase,
+  listClientDocuments,
+} from './documentService';
+import { renderDocxAsPdf } from '../engines/docxPdfRenderer';
 import type { PDFDocument as PDFDocumentType, PDFPage, PDFFont } from 'pdf-lib';
 import {
   getApplicationCaseTypeLabel,
@@ -21,6 +26,7 @@ import type {
   PrepareApplicationPackResult,
   ApplicationPackGenerationResult,
 } from '../types/applicationPack';
+import { PHYSICAL_PASSPORT_PHOTO_REMINDER } from '../constants/submission';
 
 const db = supabase as any;
 
@@ -31,6 +37,10 @@ function documentMatchesCase(
   firearmId: string | null,
   firearmLicenceId: string | null
 ): boolean {
+  if (documentReferencesApplicationCase(document, applicationCaseId)) {
+    return true;
+  }
+
   if (
     document.application_case_id &&
     document.application_case_id !== applicationCaseId
@@ -115,6 +125,8 @@ function mapRequirementState(
       return 'EXPIRED';
     case 'UNVERIFIED':
       return 'UNVERIFIED';
+    case 'PENDING_GENERATION':
+      return 'MISSING';
     default:
       return 'MISSING';
   }
@@ -185,7 +197,9 @@ export async function buildApplicationPackManifest(
   }
 
   const items: ApplicationPackItem[] =
-    readiness.requirements.map(
+    readiness.requirements
+      .filter((requirement) => requirement.documentType !== 'PASSPORT_PHOTO')
+      .map(
       (requirement, index) => ({
         key: requirement.key,
         order: index + 1,
@@ -371,6 +385,9 @@ function manifestHtml(
   <h2>Blocking reasons</h2>
   ${blockers}
 
+  <h2>Physical submission reminder</h2>
+  <p>${escapeHtml(PHYSICAL_PASSPORT_PHOTO_REMINDER)}</p>
+
   <h2>Submission order</h2>
   <table>
     <thead>
@@ -455,7 +472,16 @@ async function addCoverAndChecklist(
   const regular = await target.embedFont(StandardFonts.Helvetica);
   const bold = await target.embedFont(StandardFonts.HelveticaBold);
   const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
-  page.drawText('LicenceGuard', { x: 44, y: 780, size: 24, font: bold, color: rgb(0.55, 0, 0.04) });
+  try {
+    const logoResponse = await fetch('/branding/licenceguard-logo-primary.png');
+    if (!logoResponse.ok) throw new Error(`Logo request failed (${logoResponse.status}).`);
+    const logo = await target.embedPng(await logoResponse.arrayBuffer());
+    const logoHeight = 92;
+    const logoWidth = logo.width * (logoHeight / logo.height);
+    page.drawImage(logo, { x: A4_WIDTH - 44 - logoWidth, y: 704, width: logoWidth, height: logoHeight });
+  } catch {
+    page.drawText('LicenceGuard', { x: 44, y: 780, size: 24, font: bold, color: rgb(0.55, 0, 0.04) });
+  }
   page.drawText('APPLICATION PACK', { x: 44, y: 746, size: 18, font: bold });
   page.drawText(manifest.applicationTypeLabel, { x: 44, y: 718, size: 13, font: bold });
   const coverRows = [
@@ -483,7 +509,10 @@ async function addCoverAndChecklist(
   const checklist = target.addPage([A4_WIDTH, A4_HEIGHT]);
   checklist.drawText('APPLICATION PACK CHECKLIST', { x: 44, y: 790, size: 17, font: bold });
   checklist.drawText(`${manifest.clientName} — ${manifest.subject}`, { x: 44, y: 766, size: 10, font: regular });
-  let cy = 732;
+  checklist.drawText(PHYSICAL_PASSPORT_PHOTO_REMINDER, {
+    x: 44, y: 738, size: 9, font: bold, maxWidth: 505,
+  });
+  let cy = 700;
   manifest.items.forEach((item) => {
     if (cy < 74) {
       cy = 790;
@@ -553,6 +582,115 @@ async function appendStoredDocument(
   }
 }
 
+function isDocxDocument(document: DocumentRecord): boolean {
+  const mime = (document.mime_type ?? '').toLowerCase();
+  return mime.includes('officedocument.wordprocessingml.document')
+    || document.file_name.toLowerCase().endsWith('.docx');
+}
+
+async function findExistingPdfWorkingCopy(source: DocumentRecord): Promise<DocumentRecord | null> {
+  const result = await db
+    .from('documents')
+    .select('*')
+    .eq('parent_document_id', source.id)
+    .eq('application_case_id', source.application_case_id)
+    .eq('document_type', source.document_type)
+    .eq('lifecycle_status', 'ACTIVE')
+    .eq('is_generated', true)
+    .eq('mime_type', 'application/pdf')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (result.error) throw new Error(result.error.message);
+  return (result.data?.[0] as DocumentRecord | undefined) ?? null;
+}
+
+async function createMotivationPdfWorkingCopy(
+  source: DocumentRecord,
+  dealerId: string,
+  userId: string,
+  clientId: string,
+  applicationCaseId: string
+): Promise<DocumentRecord> {
+  const existing = await findExistingPdfWorkingCopy(source);
+  if (existing) return existing;
+
+  const sourceUrl = await createDocumentSignedUrl(source.storage_path);
+  const sourceResponse = await fetch(sourceUrl);
+  if (!sourceResponse.ok) {
+    throw new Error(`The selected motivation DOCX could not be downloaded (${sourceResponse.status}).`);
+  }
+
+  let pdfBytes: Uint8Array;
+  try {
+    pdfBytes = await renderDocxAsPdf(new Uint8Array(await sourceResponse.arrayBuffer()));
+  } catch (error) {
+    throw new Error(
+      `The selected motivation could not be converted to PDF. ${
+        error instanceof Error ? error.message : 'The browser DOCX renderer failed.'
+      }`
+    );
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseName = (source.original_file_name ?? source.file_name)
+    .replace(/\.docx$/i, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 90) || 'motivation';
+  const fileName = `${baseName}_${timestamp}.pdf`;
+  const storagePath = `${dealerId}/${clientId}/MOTIVATION/GENERATED_PDF/${fileName}`;
+  const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' });
+  const upload = await db.storage
+    .from(DOCUMENT_BUCKET)
+    .upload(storagePath, blob, { contentType: 'application/pdf', upsert: false });
+  if (upload.error) throw new Error(upload.error.message);
+
+  const inserted = await db
+    .from('documents')
+    .insert({
+      dealer_id: dealerId,
+      client_id: clientId,
+      competency_id: source.competency_id,
+      firearm_id: source.firearm_id,
+      firearm_licence_id: source.firearm_licence_id,
+      application_case_id: applicationCaseId,
+      parent_document_id: source.id,
+      document_type: 'MOTIVATION',
+      document_scope: 'APPLICATION_CASE',
+      lifecycle_status: 'ACTIVE',
+      document_name: `${source.document_name} — PDF working copy`,
+      document_date: source.document_date,
+      expiry_date: source.expiry_date,
+      issued_by: source.issued_by,
+      reference_number: source.reference_number,
+      version_number: source.version_number + 1,
+      storage_path: storagePath,
+      file_name: fileName,
+      original_file_name: fileName,
+      mime_type: 'application/pdf',
+      file_size_bytes: blob.size,
+      is_verified: source.is_verified,
+      is_generated: true,
+      generated_from_template_id: source.generated_from_template_id,
+      notes: 'Browser-rendered PDF working copy. The original DOCX remains unchanged and linked as the parent document.',
+      metadata: {
+        ...source.metadata,
+        sourceDocumentId: source.id,
+        sourceFileName: source.original_file_name ?? source.file_name,
+        renderer: 'DOCX_PREVIEW_HTML2CANVAS_PDF_V1',
+      },
+      uploaded_by: userId,
+    })
+    .select('*')
+    .single();
+
+  if (inserted.error) {
+    await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
+    throw new Error(inserted.error.message);
+  }
+  return inserted.data as DocumentRecord;
+}
+
 export async function generateAndArchiveApplicationPack(input: {
   dealerId: string;
   userId: string;
@@ -572,9 +710,31 @@ export async function generateAndArchiveApplicationPack(input: {
 
   for (const item of manifest.items.sort((a, b) => a.order - b.order)) {
     if (!item.document) continue;
-    const result = await appendStoredDocument(pdf, item.document, pdfLib);
-    if (result.included) includedDocumentIds.push(item.document.id);
-    else skippedDocuments.push({ documentId: item.document.id, name: item.document.document_name, reason: result.reason ?? 'Unknown merge error.' });
+    const packDocument = item.document.document_type === 'MOTIVATION' && isDocxDocument(item.document)
+      ? await createMotivationPdfWorkingCopy(
+          item.document,
+          input.dealerId,
+          input.userId,
+          input.clientId,
+          input.applicationCaseId
+        )
+      : item.document;
+    const result = await appendStoredDocument(pdf, packDocument, pdfLib);
+    if (result.included) {
+      includedDocumentIds.push(packDocument.id);
+    } else if (item.required && item.document.document_type === 'MOTIVATION') {
+      throw new Error(
+        `The required motivation "${item.document.document_name}" could not be included in the final pack. ${
+          result.reason ?? 'The PDF working copy could not be merged.'
+        }`
+      );
+    } else {
+      skippedDocuments.push({
+        documentId: packDocument.id,
+        name: packDocument.document_name,
+        reason: result.reason ?? 'Unknown merge error.',
+      });
+    }
   }
 
   const bytes = await pdf.save();
@@ -622,8 +782,7 @@ export async function generateAndArchiveApplicationPack(input: {
       skippedDocuments,
       renderer: 'LICENCEGUARD_APPLICATION_PACK_V1',
     },
-    created_by: input.userId,
-    updated_by: input.userId,
+    uploaded_by: input.userId,
   }).select('*').single();
 
   if (inserted.error) {

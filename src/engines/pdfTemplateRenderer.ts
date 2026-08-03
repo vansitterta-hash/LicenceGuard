@@ -6,9 +6,22 @@ import type { DocumentLayoutElement } from '../types/documentLayout';
 
 function splitText(value: string, font: PDFFont, size: number, maxWidth?: number, maxLines = 1): string[] {
   if (!maxWidth) return [value];
+  const truncationMarker = '...';
+  const truncateToWidth = (text: string, appendMarker = false): string => {
+    if (!appendMarker && font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+    let truncatedText = text;
+    while (
+      truncatedText.length > 0
+      && font.widthOfTextAtSize(`${truncatedText}${truncationMarker}`, size) > maxWidth
+    ) {
+      truncatedText = truncatedText.slice(0, -1);
+    }
+    return `${truncatedText}${truncationMarker}`;
+  };
   const words = value.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = '';
+  let truncated = false;
 
   for (const word of words) {
     const candidate = current ? `${current} ${word}` : word;
@@ -16,18 +29,27 @@ function splitText(value: string, font: PDFFont, size: number, maxWidth?: number
       current = candidate;
       continue;
     }
-    if (current) lines.push(current);
+    if (current) {
+      lines.push(current);
+      current = '';
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+    }
+    if (font.widthOfTextAtSize(word, size) > maxWidth) {
+      current = truncateToWidth(word, true);
+      truncated = true;
+      break;
+    }
     current = word;
-    if (lines.length >= maxLines) break;
   }
   if (current && lines.length < maxLines) lines.push(current);
   if (lines.length === 0) lines.push(value);
 
-  const joinedLength = lines.join(' ').length;
-  if (joinedLength < value.length && lines.length > 0) {
-    let last = lines[lines.length - 1];
-    while (last.length > 1 && font.widthOfTextAtSize(`${last}…`, size) > maxWidth) last = last.slice(0, -1);
-    lines[lines.length - 1] = `${last}…`;
+  if (!truncated && lines.join(' ').length < value.trim().length) truncated = true;
+  if (truncated && lines.length > 0 && !lines[lines.length - 1].endsWith(truncationMarker)) {
+    lines[lines.length - 1] = truncateToWidth(lines[lines.length - 1], true);
   }
   return lines;
 }
@@ -46,7 +68,11 @@ export async function renderOfficialPdfTemplate(input: {
   if (!layout) throw new Error(`Official PDF rendering is not configured for ${input.template.code}.`);
 
   const proxyUrl = `/api/saps-template?code=${encodeURIComponent(input.template.code)}`;
-  let response = await fetch(proxyUrl);
+  const pinnedTemplateUrl = layout.sourceUrl.startsWith('/')
+    ? layout.sourceUrl
+    : null;
+  let response = await fetch(pinnedTemplateUrl ?? proxyUrl);
+  if (!response.ok && pinnedTemplateUrl) response = await fetch(proxyUrl);
   if (!response.ok) response = await fetch(layout.sourceUrl || input.template.sourceUrl);
   if (!response.ok) throw new Error(`Unable to download the official ${input.template.code} template. Check your connection and try again.`);
 
@@ -59,6 +85,10 @@ export async function renderOfficialPdfTemplate(input: {
   for (const element of layout.elements) {
     const page = pages[element.page - 1];
     if (!page) continue;
+    if (
+      element.conditionFieldId
+      && resolveDocumentField(element.conditionFieldId, input.context) !== element.conditionValue
+    ) continue;
     const value = resolveElementValue(element, input.context);
     if (!value) continue;
     const size = element.fontSize ?? 9;

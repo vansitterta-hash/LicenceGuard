@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,10 +14,9 @@ import {
 } from 'react-native';
 import { LockKeyhole, Mail } from 'lucide-react-native';
 
+import LicenceGuardLogo from '../components/LicenceGuardLogo';
 import { useAuth } from '../context/AuthContext';
 import { Colors } from '../theme/colors';
-
-const licenceGuardLogo = require('../../assets/LicenceGuard Logo.png');
 
 export default function LoginScreen() {
   const { signIn, loading } = useAuth();
@@ -62,11 +60,9 @@ export default function LoginScreen() {
         >
           <View style={styles.container}>
             <View style={styles.brandSection}>
-              <Image
-                accessibilityLabel="LicenceGuard"
-                resizeMode="contain"
-                source={licenceGuardLogo}
+              <LicenceGuardLogo
                 style={styles.logo}
+                width="32%"
               />
 
               <Text style={styles.brandSubtitle}>
@@ -215,9 +211,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   logo: {
-    height: 154,
-    maxWidth: 440,
-    width: '80%',
+    maxWidth: 124,
   },
   brandSubtitle: {
     color: Colors.silver,

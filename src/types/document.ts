@@ -86,8 +86,9 @@ export type DocumentRecord = {
   archive_reason: string | null;
   notes: string | null;
   metadata: Record<string, unknown>;
-  created_by: string | null;
-  updated_by: string | null;
+  uploaded_by: string | null;
+  verified_at: string | null;
+  verified_by: string | null;
   created_at: string;
   updated_at: string;
 };

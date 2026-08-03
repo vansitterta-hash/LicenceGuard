@@ -175,8 +175,7 @@ export async function archiveCompletedApplication(input: {
       applicationType: input.data.application.applicationType,
       reviewValues: input.values,
     },
-    created_by: input.userId,
-    updated_by: input.userId,
+    uploaded_by: input.userId,
   }).select('*').single();
 
   if (inserted.error) {
@@ -249,8 +248,7 @@ export async function archiveOfficialApplicationPdf(input: {
       reviewValues: input.values,
       renderer: 'LICENCEGUARD_PDF_OVERLAY_V1',
     },
-    created_by: input.userId,
-    updated_by: input.userId,
+    uploaded_by: input.userId,
   }).select('*').single();
 
   if (inserted.error) {

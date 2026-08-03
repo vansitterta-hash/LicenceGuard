@@ -20,6 +20,8 @@ export type DocumentLayoutElement = {
   uppercase?: boolean;
   choiceValue?: string;
   mark?: string;
+  conditionFieldId?: DocumentFieldId;
+  conditionValue?: string;
 };
 
 export type DocumentLayoutDefinition = {

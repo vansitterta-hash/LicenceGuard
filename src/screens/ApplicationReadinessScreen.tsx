@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -32,6 +31,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import ReadOnlyIntelligencePanel from '../components/intelligence/ReadOnlyIntelligencePanel';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -49,6 +49,8 @@ import {
 } from '../services/applicationWorkspaceService';
 import {
   createDocumentSignedUrl,
+  documentReferencesApplicationCase,
+  linkReusableClientDocumentsToApplicationCase,
   listClientDocuments,
 } from '../services/documentService';
 import { buildReferenceLibraryUrl } from '../services/referenceLibraryService';
@@ -61,6 +63,8 @@ import type { ReadinessRequirement } from '../types/applicationReadiness';
 import { getDocumentTypeLabel, type DocumentRecord } from '../types/document';
 import { getApplicationCaseTypeLabel } from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
+import { PHYSICAL_PASSPORT_PHOTO_REMINDER } from '../constants/submission';
+import { openExternalDocument } from '../utils/openExternalDocument';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ApplicationReadiness'>;
 type SuggestionResult = Awaited<ReturnType<typeof suggestApplicationDocuments>>;
@@ -94,10 +98,27 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [readiness, clientDocuments] = await Promise.all([
+      let [readiness, clientDocuments] = await Promise.all([
         getClientApplicationReadiness(route.params.clientId),
         listClientDocuments(route.params.clientId),
       ]);
+      const selectedCase = readiness.cases.find(
+        (item) => item.caseId === route.params.applicationCaseId
+      );
+      if (selectedCase && user?.id) {
+        const linkedCount = await linkReusableClientDocumentsToApplicationCase({
+          applicationCaseId: selectedCase.caseId,
+          userId: user.id,
+          documents: clientDocuments,
+          requirements: selectedCase.requirements,
+        });
+        if (linkedCount > 0) {
+          [readiness, clientDocuments] = await Promise.all([
+            getClientApplicationReadiness(route.params.clientId),
+            listClientDocuments(route.params.clientId),
+          ]);
+        }
+      }
       setData(readiness);
       setDocuments(clientDocuments);
     } catch (error) {
@@ -108,7 +129,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     } finally {
       setLoading(false);
     }
-  }, [route.params.clientId]);
+  }, [route.params.applicationCaseId, route.params.clientId, user?.id]);
 
   useEffect(() => {
     void loadData();
@@ -129,6 +150,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       (document) =>
         document.lifecycle_status === 'ACTIVE' &&
         (document.application_case_id === applicationCase.caseId ||
+          documentReferencesApplicationCase(document, applicationCase.caseId) ||
           document.document_scope === 'CLIENT')
     );
   }, [applicationCase, documents]);
@@ -254,24 +276,34 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
   const openReferenceDocument = useCallback(async (suggestion: ApplicationDocumentSuggestion) => {
     try {
-      const url = buildReferenceLibraryUrl(suggestion.item.relativePath);
-      const supported = await Linking.canOpenURL(url);
-      if (!supported) throw new Error('This device cannot open the selected document.');
-      await Linking.openURL(url);
+      await openExternalDocument(
+        () => buildReferenceLibraryUrl(suggestion.item.relativePath),
+        {
+          applicationCaseId: route.params.applicationCaseId,
+          clientId: route.params.clientId,
+          originatingRoute: 'ApplicationReadiness',
+          workflowStep: 'document-suggestions',
+        }
+      );
     } catch (error) {
       Alert.alert('Unable to open document', error instanceof Error ? error.message : 'An unknown error occurred.');
     }
-  }, []);
+  }, [route.params.applicationCaseId, route.params.clientId]);
 
 
   const openStoredDocument = useCallback(async (document: DocumentRecord) => {
     setOpeningDocumentId(document.id);
 
     try {
-      const signedUrl = await createDocumentSignedUrl(document.storage_path);
-      const supported = await Linking.canOpenURL(signedUrl);
-      if (!supported) throw new Error('This device cannot open the secure document link.');
-      await Linking.openURL(signedUrl);
+      await openExternalDocument(
+        () => createDocumentSignedUrl(document.storage_path),
+        {
+          applicationCaseId: route.params.applicationCaseId,
+          clientId: route.params.clientId,
+          originatingRoute: 'ApplicationReadiness',
+          workflowStep: 'document-review',
+        }
+      );
     } catch (error) {
       Alert.alert(
         'Unable to open document',
@@ -280,7 +312,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     } finally {
       setOpeningDocumentId(null);
     }
-  }, []);
+  }, [route.params.applicationCaseId, route.params.clientId]);
 
   if (loading || !data) {
     return (
@@ -320,6 +352,13 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 
   const openRequirement = (requirement: ReadinessRequirement) => {
+    if (requirement.state === 'PENDING_GENERATION') {
+      navigation.navigate('ApplicationAutofill', {
+        clientId: route.params.clientId,
+        applicationCaseId: applicationCase.caseId,
+      });
+      return;
+    }
     if (requirement.documentType) {
       navigation.navigate('DocumentLibrary', {
         clientId: route.params.clientId,
@@ -548,6 +587,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         </Text>
       </View>
 
+      <ReadOnlyIntelligencePanel applicationCaseId={applicationCase.caseId} />
+
       <Card
         title="Guided application workflow"
         subtitle="Completed steps stay compact. LicenceGuard keeps the current step open so the next action is always clear."
@@ -657,6 +698,14 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
             </View>
           ))}
         </View>
+      </Card>
+
+      <Card
+        title="Physical submission reminder"
+      >
+        <Text style={styles.mutedLeft}>
+          {PHYSICAL_PASSPORT_PHOTO_REMINDER}
+        </Text>
       </Card>
 
       <Card
@@ -811,6 +860,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                           ? 'Attached and verified'
                           : requirement.state === 'UNVERIFIED'
                             ? 'Awaiting verification'
+                            : requirement.state === 'PENDING_GENERATION'
+                              ? 'Ready for LicenceGuard generation'
                             : requirement.state === 'EXPIRED'
                               ? 'Expired'
                               : 'Missing'}
@@ -837,13 +888,21 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
                     <Button
                       leftIcon={
-                        document
+                        requirement.state === 'PENDING_GENERATION'
+                          ? <FileOutput color={Colors.silver} size={16} />
+                          : document
                           ? <RefreshCw color={Colors.silver} size={16} />
                           : <Upload color={Colors.silver} size={16} />
                       }
                       onPress={() => openRequirement(requirement)}
                       size="small"
-                      title={document ? 'Replace' : 'Upload'}
+                      title={
+                        requirement.state === 'PENDING_GENERATION'
+                          ? 'Generate'
+                          : document
+                            ? 'Replace'
+                            : 'Upload'
+                      }
                       variant="ghost"
                     />
                   </View>
@@ -934,7 +993,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       ) : null}
 
       {!ready ? (
-        <Card title="Do this next" subtitle="Only the outstanding items are shown. Tap an item to upload or replace it.">
+        <Card title="Do this next" subtitle="Only outstanding actions are shown. LicenceGuard-generated forms open AutoFill; supporting records open document upload or verification.">
           <View style={styles.list}>
             {outstanding.map((requirement) => (
               <RequirementRow
@@ -1037,7 +1096,13 @@ function SuggestionGroup({ title, items, onView }: { title: string; items: Appli
 }
 
 function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequirement; onPress: () => void }) {
-  const stateLabel = requirement.state === 'EXPIRED' ? 'Expired' : requirement.state === 'UNVERIFIED' ? 'Confirm' : 'Missing';
+  const stateLabel = requirement.state === 'EXPIRED'
+    ? 'Expired'
+    : requirement.state === 'UNVERIFIED'
+      ? 'Confirm'
+      : requirement.state === 'PENDING_GENERATION'
+        ? 'Generate'
+        : 'Missing';
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.requirement, pressed ? styles.pressed : null]}>

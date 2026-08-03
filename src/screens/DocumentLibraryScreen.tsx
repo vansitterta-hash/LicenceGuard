@@ -8,7 +8,6 @@ import {
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -40,6 +39,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import PrivateLibraryExplorer from '../components/library/PrivateLibraryExplorer';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import { getClient } from '../services/clientService';
@@ -65,6 +65,7 @@ import {
   type DocumentType,
 } from '../types/document';
 import type { RootStackParamList } from '../types/navigation';
+import { openExternalDocument } from '../utils/openExternalDocument';
 
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -119,6 +120,7 @@ export default function DocumentLibraryScreen({
   const [typePickerVisible, setTypePickerVisible] =
     useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [workingDocumentId, setWorkingDocumentId] =
     useState<string | null>(null);
   const [form, setForm] =
@@ -167,6 +169,7 @@ export default function DocumentLibraryScreen({
 
   useEffect(() => {
     if (!route.params.openUpload) return;
+    if (route.params.documentType === 'PASSPORT_PHOTO') return;
     setForm((current) => ({
       ...current,
       documentType: route.params.documentType ?? current.documentType,
@@ -232,7 +235,9 @@ export default function DocumentLibraryScreen({
         name: asset.name,
         mimeType: asset.mimeType ?? null,
         size: asset.size ?? null,
+        webFile: asset.file ?? null,
       };
+      setUploadError(null);
 
       setForm((current) => ({
         ...current,
@@ -256,9 +261,18 @@ export default function DocumentLibraryScreen({
     setForm(EMPTY_UPLOAD_FORM);
     setTypePickerVisible(false);
     setUploadVisible(false);
+    setUploadError(null);
   };
 
   const submitUpload = async () => {
+    if (uploading) return;
+    if (form.documentType === 'PASSPORT_PHOTO') {
+      Alert.alert(
+        'Physical photographs only',
+        'Passport photographs must be attached physically before submission to SAPS and are not stored in LicenceGuard.'
+      );
+      return;
+    }
     if (
       !dealerProfile?.dealerId ||
       !user?.id ||
@@ -280,7 +294,7 @@ export default function DocumentLibraryScreen({
     }
 
     setUploading(true);
-
+    setUploadError(null);
     try {
       await uploadClientDocument({
         dealerId: dealerProfile.dealerId,
@@ -298,13 +312,33 @@ export default function DocumentLibraryScreen({
       });
 
       resetUpload();
-      await loadData(false);
+      setUploading(false);
+      try {
+        await Promise.race([
+          loadData(false),
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error('The upload succeeded, but refreshing the document library timed out.')),
+              30_000
+            );
+          }),
+        ]);
+      } catch (refreshError) {
+        Alert.alert(
+          'Document uploaded; refresh failed',
+          refreshError instanceof Error
+            ? refreshError.message
+            : 'Refresh the workspace to see the uploaded document.'
+        );
+      }
     } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'An unknown error occurred.';
+      setUploadError(message);
       Alert.alert(
         'Unable to upload document',
-        error instanceof Error
-          ? error.message
-          : 'An unknown error occurred.'
+        message
       );
     } finally {
       setUploading(false);
@@ -317,22 +351,17 @@ export default function DocumentLibraryScreen({
     setWorkingDocumentId(document.id);
 
     try {
-      const signedUrl =
-        await createDocumentSignedUrl(
-          document.storage_path
-        );
-
-      const supported = await Linking.canOpenURL(
-        signedUrl
+      await openExternalDocument(
+        () => createDocumentSignedUrl(document.storage_path),
+        {
+          applicationCaseId: route.params.applicationCaseId,
+          clientId: route.params.clientId,
+          originatingRoute: 'DocumentLibrary',
+          workflowStep: route.params.applicationCaseId
+            ? 'application-document-review'
+            : 'client-document-library',
+        }
       );
-
-      if (!supported) {
-        throw new Error(
-          'This device cannot open the secure document link.'
-        );
-      }
-
-      await Linking.openURL(signedUrl);
     } catch (error) {
       Alert.alert(
         'Unable to open document',
@@ -517,6 +546,11 @@ export default function DocumentLibraryScreen({
           />
         </View>
 
+        <PrivateLibraryExplorer
+          applicationCaseId={route.params.applicationCaseId}
+          clientId={route.params.clientId}
+        />
+
         <View style={styles.toolbar}>
           <View>
             <Text style={styles.sectionTitle}>
@@ -616,8 +650,10 @@ export default function DocumentLibraryScreen({
                 onOpen={() =>
                   void openDocument(document)
                 }
-                onVerify={() =>
-                  void toggleVerification(document)
+                onVerify={
+                  document.document_type === 'PASSPORT_PHOTO'
+                    ? undefined
+                    : () => void toggleVerification(document)
                 }
               />
             ))}
@@ -761,7 +797,9 @@ export default function DocumentLibraryScreen({
                     nestedScrollEnabled
                     style={styles.typeOptions}
                   >
-                    {DOCUMENT_TYPE_OPTIONS.map(
+                    {DOCUMENT_TYPE_OPTIONS.filter(
+                      (option) => option.value !== 'PASSPORT_PHOTO'
+                    ).map(
                       (option) => (
                         <Pressable
                           key={option.value}
@@ -905,6 +943,9 @@ export default function DocumentLibraryScreen({
             </View>
 
             <View style={styles.modalActions}>
+              {uploadError ? (
+                <Text style={styles.uploadError}>{uploadError}</Text>
+              ) : null}
               <Button
                 disabled={uploading}
                 onPress={resetUpload}
@@ -1680,8 +1721,14 @@ const styles = StyleSheet.create({
   },
   modalActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.md,
     justifyContent: 'flex-end',
     marginTop: Spacing.xl,
+  },
+  uploadError: {
+    ...Typography.caption,
+    color: Colors.danger,
+    flexBasis: '100%',
   },
 });

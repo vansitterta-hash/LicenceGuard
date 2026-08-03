@@ -4,6 +4,7 @@ import {
   StyleSheet,
 } from 'react-native';
 
+import LicenceGuardLogo from './src/components/LicenceGuardLogo';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import LoginScreen from './src/screens/LoginScreen';
@@ -15,6 +16,7 @@ function RootApplication() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
+        <LicenceGuardLogo style={styles.loadingLogo} width={150} />
         <ActivityIndicator
           color={Colors.primary}
           size="large"
@@ -44,5 +46,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     flex: 1,
     justifyContent: 'center',
+  },
+  loadingLogo: {
+    marginBottom: 24,
   },
 });

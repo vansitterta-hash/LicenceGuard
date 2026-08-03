@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
   Alert,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -34,6 +33,7 @@ import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { RootStackParamList } from '../types/navigation';
+import { openExternalDocument } from '../utils/openExternalDocument';
 
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -166,8 +166,16 @@ export default function ReferenceLibraryScreen({
     item: ReferenceLibraryItem
   ) => {
     try {
-      await Linking.openURL(
-        buildReferenceLibraryUrl(item.relativePath)
+      await openExternalDocument(
+        () => buildReferenceLibraryUrl(item.relativePath),
+        {
+          applicationCaseId: route.params?.applicationCaseId,
+          clientId: route.params?.clientId,
+          originatingRoute: 'ReferenceLibrary',
+          workflowStep: route.params?.selectionMode
+            ? 'application-reference-selection'
+            : 'reference-review',
+        }
       );
     } catch {
       Alert.alert(

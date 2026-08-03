@@ -31,6 +31,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import ProactiveRenewalPreviewPanel from '../components/client/ProactiveRenewalPreviewPanel';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -445,6 +446,8 @@ export default function ClientProfileScreen({
           </View>
         </View>
       </Card>
+
+      <ProactiveRenewalPreviewPanel clientId={client.id} />
 
       <View style={styles.summaryGrid}>
         <SummaryCard

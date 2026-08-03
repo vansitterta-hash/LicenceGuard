@@ -13,6 +13,7 @@ export type RequirementState =
   | 'MISSING'
   | 'UNVERIFIED'
   | 'EXPIRED'
+  | 'PENDING_GENERATION'
   | 'NOT_APPLICABLE';
 
 export type ReadinessRequirement = {
