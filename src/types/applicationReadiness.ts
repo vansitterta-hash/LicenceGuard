@@ -14,7 +14,14 @@ export type RequirementState =
   | 'UNVERIFIED'
   | 'EXPIRED'
   | 'PENDING_GENERATION'
+  | 'MANUAL_REQUIRED'
+  | 'PHYSICAL_REQUIRED'
   | 'NOT_APPLICABLE';
+
+export type RequirementDelivery =
+  | 'DIGITAL'
+  | 'MANUAL_PACK'
+  | 'PHYSICAL_SUBMISSION';
 
 export type ReadinessRequirement = {
   key: string;
@@ -23,6 +30,10 @@ export type ReadinessRequirement = {
   state: RequirementState;
   required: boolean;
   documentType: DocumentType | null;
+  acceptableDocumentTypes?: DocumentType[];
+  evidenceKind?: 'SAFE_PHOTO' | 'SAFE_SECURING_PHOTO';
+  requiresFirearmMatch?: boolean;
+  delivery: RequirementDelivery;
 };
 
 export type ApplicationCaseReadiness = {

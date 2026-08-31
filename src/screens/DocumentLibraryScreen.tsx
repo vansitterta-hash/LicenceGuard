@@ -175,7 +175,7 @@ export default function DocumentLibraryScreen({
       documentType: route.params.documentType ?? current.documentType,
     }));
     setUploadVisible(true);
-  }, [route.params.documentType, route.params.openUpload]);
+  }, [route.params.documentType, route.params.evidenceKind, route.params.openUpload]);
 
   const activeDocuments = useMemo(
     () =>
@@ -300,7 +300,12 @@ export default function DocumentLibraryScreen({
         dealerId: dealerProfile.dealerId,
         clientId: route.params.clientId,
         userId: user.id,
-        applicationCaseId: route.params.applicationCaseId,
+        applicationCaseId: route.params.evidenceKind ? undefined : route.params.applicationCaseId,
+        firearmId: route.params.firearmId,
+        documentScope: route.params.documentScope,
+        metadata: route.params.evidenceKind
+          ? { evidenceKind: route.params.evidenceKind }
+          : undefined,
         documentType: form.documentType,
         documentName: form.documentName,
         documentDate: form.documentDate,

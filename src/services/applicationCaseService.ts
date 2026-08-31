@@ -579,6 +579,38 @@ export async function updateApplicationCase(
   );
 }
 
+export async function updateApplicationSupplierDetails(input: {
+  applicationCaseId: string;
+  dealerId: string;
+  clientId: string;
+  userId: string;
+  supplierName: string;
+  supplierIdOrRegistration: string;
+  supplierContact: string;
+  supplierLicenceNumber: string;
+  saleOrInvoiceReference: string;
+}): Promise<ApplicationCaseRecord> {
+  const { data, error } = await supabase
+    .from('application_cases')
+    .update({
+      supplier_name: emptyToNull(input.supplierName),
+      supplier_id_or_registration: emptyToNull(input.supplierIdOrRegistration),
+      supplier_contact: emptyToNull(input.supplierContact),
+      supplier_licence_number: emptyToNull(input.supplierLicenceNumber),
+      sale_or_invoice_reference: emptyToNull(input.saleOrInvoiceReference),
+      updated_by: input.userId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.applicationCaseId)
+    .eq('dealer_id', input.dealerId)
+    .eq('client_id', input.clientId)
+    .select('*')
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data as ApplicationCaseRecord;
+}
+
 export async function deleteApplicationCase(
   applicationCaseId: string,
   dealerId: string

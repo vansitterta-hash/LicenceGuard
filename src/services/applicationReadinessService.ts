@@ -31,6 +31,8 @@ type CaseRow = {
   firearm_licence_id: string | null;
   licence_section: string | null;
   acquisition_source: 'DEALER' | 'PRIVATE_SELLER' | 'EXISTING_FIREARM' | 'NOT_APPLICABLE' | null;
+  supplier_name: string | null;
+  supplier_id_or_registration: string | null;
 };
 type CompetencyRow = {
   id: string;
@@ -62,6 +64,11 @@ type RequirementDefinition = {
   detail: string;
   documentType: DocumentType | null;
   required: boolean;
+  acceptableDocumentTypes?: DocumentType[];
+  evidenceKind?: 'SAFE_PHOTO' | 'SAFE_SECURING_PHOTO';
+  requiresFirearmMatch?: boolean;
+  manualWhenMissing?: boolean;
+  delivery?: 'DIGITAL' | 'MANUAL_PACK' | 'PHYSICAL_SUBMISSION';
 };
 
 const COMMON: RequirementDefinition[] = [
@@ -96,33 +103,35 @@ const REQUIREMENTS: Partial<Record<ApplicationCaseType, RequirementDefinition[]>
     ...COMMON,
     { key: 'COMPETENCY_CERTIFICATE', label: 'Matching competency certificate', detail: 'A verified competency matching the firearm category.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
     { key: 'FIREARM_LICENCE_APPLICATION_FORM', label: 'Firearm licence application form', detail: 'The applicable SAPS firearm licence application form.', documentType: 'FIREARM_LICENCE_APPLICATION_FORM', required: true },
-    { key: 'PURCHASE_INVOICE', label: 'Purchase or sale document', detail: 'Dealer invoice or private-sale documentation.', documentType: 'PURCHASE_INVOICE', required: true },
-    { key: 'MOTIVATION', label: 'Licence motivation', detail: 'Motivation for the firearm licence application.', documentType: 'MOTIVATION', required: true },
-    { key: 'SAFE_AFFIDAVIT', label: 'Safe affidavit', detail: 'Evidence or affidavit confirming compliant safe storage.', documentType: 'SAFE_AFFIDAVIT', required: true },
+    { key: 'MOTIVATION', label: 'Licence motivation', detail: 'Motivation for the firearm licence application.', documentType: 'MOTIVATION', required: true, requiresFirearmMatch: true },
+    { key: 'SAFE_PHOTOS', label: 'Safe photographs', detail: 'Photographs showing the client’s firearm safe.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_PHOTO', required: true },
+    { key: 'SAFE_SECURING_PHOTOS', label: 'Safe securing/anchoring photographs', detail: 'Photographs showing how the safe is secured to the wall and/or floor.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_SECURING_PHOTO', required: true },
   ],
   FIREARM_LICENCE_ADDITIONAL_APPLICATION: [
     ...COMMON,
     { key: 'COMPETENCY_CERTIFICATE', label: 'Matching competency certificate', detail: 'A verified competency matching the firearm category.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
     { key: 'FIREARM_LICENCE_APPLICATION_FORM', label: 'Firearm licence application form', detail: 'The applicable SAPS firearm licence application form.', documentType: 'FIREARM_LICENCE_APPLICATION_FORM', required: true },
-    { key: 'PURCHASE_INVOICE', label: 'Purchase or sale document', detail: 'Dealer invoice or private-sale documentation.', documentType: 'PURCHASE_INVOICE', required: true },
-    { key: 'MOTIVATION', label: 'Licence motivation', detail: 'Motivation for the additional firearm.', documentType: 'MOTIVATION', required: true },
-    { key: 'SAFE_AFFIDAVIT', label: 'Safe affidavit', detail: 'Evidence or affidavit confirming compliant safe storage.', documentType: 'SAFE_AFFIDAVIT', required: true },
+    { key: 'MOTIVATION', label: 'Licence motivation', detail: 'Motivation for the additional firearm.', documentType: 'MOTIVATION', required: true, requiresFirearmMatch: true },
+    { key: 'SAFE_PHOTOS', label: 'Safe photographs', detail: 'Photographs showing the client’s firearm safe.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_PHOTO', required: true },
+    { key: 'SAFE_SECURING_PHOTOS', label: 'Safe securing/anchoring photographs', detail: 'Photographs showing how the safe is secured to the wall and/or floor.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_SECURING_PHOTO', required: true },
   ],
   FIREARM_LICENCE_RENEWAL: [
     ...COMMON,
     { key: 'COMPETENCY_CERTIFICATE', label: 'Matching competency certificate', detail: 'A verified competency matching the firearm category.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
     { key: 'FIREARM_LICENCE_CARD', label: 'Current firearm licence card', detail: 'Front and back copies of the existing licence card.', documentType: 'FIREARM_LICENCE_CARD', required: true },
     { key: 'FIREARM_LICENCE_RENEWAL_FORM', label: 'Firearm licence renewal form', detail: 'The applicable SAPS firearm licence renewal form.', documentType: 'FIREARM_LICENCE_RENEWAL_FORM', required: true },
-    { key: 'MOTIVATION', label: 'Renewal motivation', detail: 'Motivation supporting continued possession.', documentType: 'MOTIVATION', required: true },
-    { key: 'SAFE_AFFIDAVIT', label: 'Safe affidavit', detail: 'Evidence or affidavit confirming compliant safe storage.', documentType: 'SAFE_AFFIDAVIT', required: true },
+    { key: 'MOTIVATION', label: 'Renewal motivation', detail: 'Motivation supporting continued possession.', documentType: 'MOTIVATION', required: true, requiresFirearmMatch: true },
+    { key: 'SAFE_PHOTOS', label: 'Safe photographs', detail: 'Photographs showing the client’s firearm safe.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_PHOTO', required: true },
+    { key: 'SAFE_SECURING_PHOTOS', label: 'Safe securing/anchoring photographs', detail: 'Photographs showing how the safe is secured to the wall and/or floor.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_SECURING_PHOTO', required: true },
   ],
   FIREARM_LICENCE_REAPPLICATION: [
     ...COMMON,
     { key: 'COMPETENCY_CERTIFICATE', label: 'Matching competency certificate', detail: 'A verified competency matching the firearm category.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
     { key: 'FIREARM_LICENCE_CARD', label: 'Previous firearm licence card', detail: 'Front and back copies of the previous licence card.', documentType: 'FIREARM_LICENCE_CARD', required: true },
     { key: 'FIREARM_LICENCE_APPLICATION_FORM', label: 'Firearm licence application form', detail: 'The applicable SAPS firearm licence application form.', documentType: 'FIREARM_LICENCE_APPLICATION_FORM', required: true },
-    { key: 'MOTIVATION', label: 'Reapplication motivation', detail: 'Motivation explaining the reapplication circumstances.', documentType: 'MOTIVATION', required: true },
-    { key: 'SAFE_AFFIDAVIT', label: 'Safe affidavit', detail: 'Evidence or affidavit confirming compliant safe storage.', documentType: 'SAFE_AFFIDAVIT', required: true },
+    { key: 'MOTIVATION', label: 'Reapplication motivation', detail: 'Motivation explaining the reapplication circumstances.', documentType: 'MOTIVATION', required: true, requiresFirearmMatch: true },
+    { key: 'SAFE_PHOTOS', label: 'Safe photographs', detail: 'Photographs showing the client’s firearm safe.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_PHOTO', required: true },
+    { key: 'SAFE_SECURING_PHOTOS', label: 'Safe securing/anchoring photographs', detail: 'Photographs showing how the safe is secured to the wall and/or floor.', documentType: 'SUPPORTING_DOCUMENT', evidenceKind: 'SAFE_SECURING_PHOTO', required: true },
   ],
 };
 
@@ -148,15 +157,21 @@ function stateFor(requirements: ReadinessRequirement[]): ApplicationReadinessSta
 
 function selectRequirementDocument(
   documents: DocumentRecord[],
-  documentType: DocumentType | null,
+  requirement: RequirementDefinition,
   applicationCase: CaseRow,
   firearm: FirearmRow | undefined,
   licence: LicenceRow | undefined
 ): DocumentRecord | undefined {
-  if (!documentType) return undefined;
+  if (!requirement.documentType) return undefined;
+  const acceptedTypes = requirement.acceptableDocumentTypes ?? [requirement.documentType];
   return documents
     .filter((document) => {
-      if (document.document_type !== documentType) return false;
+      if (!acceptedTypes.includes(document.document_type)) return false;
+      if (requirement.evidenceKind && document.metadata?.evidenceKind !== requirement.evidenceKind) return false;
+      if (requirement.requiresFirearmMatch) {
+        return Boolean(firearm && document.firearm_id === firearm.id)
+          && (!document.application_case_id || documentReferencesApplicationCase(document, applicationCase.id));
+      }
       if (
         document.application_case_id
         && document.application_case_id !== applicationCase.id
@@ -217,18 +232,28 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
     const definitions: RequirementDefinition[] = [...baseDefinitions];
 
+    if (applicationCase.application_type.startsWith('FIREARM_LICENCE_')) {
+      definitions.push({
+        key: 'PASSPORT_PHOTOS',
+        label: 'Passport photographs',
+        detail: 'Attach the required original passport photographs before SAPS submission.',
+        documentType: null,
+        required: true,
+        delivery: 'PHYSICAL_SUBMISSION',
+      });
+    }
+
     if (applicationCase.acquisition_source === 'DEALER') {
       definitions.push(
-        { key: 'PURCHASE_INVOICE', label: 'Dealer invoice or sale document', detail: 'Dealer invoice or sale document identifying the firearm and purchaser.', documentType: 'PURCHASE_INVOICE', required: true },
-        { key: 'DEALER_STOCK_DOCUMENT', label: 'Dealer stock document', detail: 'Dealer stock, transfer or equivalent supporting document for the firearm.', documentType: 'DEALER_STOCK_DOCUMENT', required: true },
+        { key: 'ACQUISITION_DETAILS', label: 'Dealer details', detail: 'Record the supplying dealer name before generating the application.', documentType: null, required: true },
+        { key: 'ACQUISITION_EVIDENCE', label: 'Dealer acquisition evidence', detail: 'A dealer invoice, sale document, SAP 350 or equivalent that is explicitly associated with this firearm.', documentType: 'PURCHASE_INVOICE', acceptableDocumentTypes: ['PURCHASE_INVOICE', 'DEALER_STOCK_DOCUMENT'], required: true, requiresFirearmMatch: true },
       );
     }
 
     if (applicationCase.acquisition_source === 'PRIVATE_SELLER') {
       definitions.push(
-        { key: 'SELLER_ID_COPY', label: 'Private seller ID copy', detail: 'A clear copy of the private seller’s identity document.', documentType: 'SELLER_ID_COPY', required: true },
-        { key: 'SELLER_LICENCE_COPY', label: 'Seller firearm licence copy', detail: 'A copy of the seller’s firearm licence for the firearm being sold.', documentType: 'SELLER_LICENCE_COPY', required: true },
-        { key: 'PURCHASE_INVOICE', label: 'Private sale agreement', detail: 'Signed sale agreement or equivalent proof of the private sale.', documentType: 'PURCHASE_INVOICE', required: true },
+        { key: 'ACQUISITION_DETAILS', label: 'Private seller details', detail: 'Record the seller name and identity number before generating the application.', documentType: null, required: true },
+        { key: 'ACQUISITION_EVIDENCE', label: 'Private-sale acquisition evidence', detail: 'A signed sale agreement or equivalent record explicitly associated with this firearm and seller.', documentType: 'PURCHASE_INVOICE', required: true, requiresFirearmMatch: true },
       );
     }
 
@@ -236,36 +261,51 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     if (section === '16') {
       definitions.push(
         { key: 'DEDICATED_STATUS', label: 'Dedicated status certificate', detail: 'Required proof of current dedicated status for a Section 16 application.', documentType: 'DEDICATED_STATUS', required: true },
-        { key: 'GOOD_STANDING', label: 'Good-standing letter', detail: 'Required current proof that the applicant remains in good standing.', documentType: 'GOOD_STANDING', required: true },
+        { key: 'GOOD_STANDING', label: 'Good-standing letter', detail: 'Add the current firearm/application-specific letter to the printed submission pack.', documentType: 'GOOD_STANDING', required: true, requiresFirearmMatch: true, manualWhenMissing: true },
         { key: 'MEMBERSHIP_CERTIFICATE', label: 'Membership certificate', detail: 'Required current membership evidence supporting dedicated status.', documentType: 'MEMBERSHIP_CERTIFICATE', required: true },
-        { key: 'ENDORSEMENT', label: 'Endorsement', detail: 'Required firearm-specific endorsement for the Section 16 application pack.', documentType: 'ENDORSEMENT', required: true },
-        { key: 'SUPPORTING_RESEARCH', label: 'Firearm or calibre research', detail: 'Optional supporting research that strengthens the motivation.', documentType: 'SUPPORTING_RESEARCH', required: false },
+        { key: 'ENDORSEMENT', label: 'Endorsement', detail: 'Add the correct firearm/application-specific endorsement to the printed submission pack.', documentType: 'ENDORSEMENT', required: true, requiresFirearmMatch: true, manualWhenMissing: true },
+        { key: 'SUPPORTING_RESEARCH', label: 'Firearm or calibre research', detail: 'Optional supporting research that strengthens the motivation.', documentType: 'SUPPORTING_RESEARCH', required: false, requiresFirearmMatch: true },
       );
     }
 
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;
-      if (definition.key === 'COMPETENCY_CERTIFICATE') {
+      if (definition.key === 'ACQUISITION_DETAILS') {
+        const complete = applicationCase.acquisition_source === 'DEALER'
+          ? Boolean(applicationCase.supplier_name?.trim())
+          : Boolean(applicationCase.supplier_name?.trim() && applicationCase.supplier_id_or_registration?.trim());
+        state = complete ? 'SATISFIED' : 'MISSING';
+      } else if (definition.key === 'COMPETENCY_CERTIFICATE') {
         state = !matchingCompetency || !matchingCompetency.certificate_number || !matchingCompetency.issue_date
           ? 'MISSING'
           : matchingCompetency.verified ? 'SATISFIED' : 'UNVERIFIED';
       } else {
         const linked = selectRequirementDocument(
           documents,
-          definition.documentType,
+          definition,
           applicationCase,
           firearm,
           licence
         );
-        state = !linked && definition.documentType && GENERATED_APPLICATION_FORM_TYPES.has(definition.documentType)
-          ? 'PENDING_GENERATION'
-          : documentState(linked);
+        state = definition.delivery === 'PHYSICAL_SUBMISSION'
+          ? 'PHYSICAL_REQUIRED'
+          : !linked && definition.manualWhenMissing
+            ? 'MANUAL_REQUIRED'
+            : !linked && definition.documentType && GENERATED_APPLICATION_FORM_TYPES.has(definition.documentType)
+              ? 'PENDING_GENERATION'
+              : documentState(linked);
       }
-      return { ...definition, state };
+      return {
+        ...definition,
+        state,
+        delivery: state === 'MANUAL_REQUIRED'
+          ? 'MANUAL_PACK' as const
+          : definition.delivery ?? 'DIGITAL' as const,
+      };
     });
 
     if (firearm && !matchingCompetency) {
-      requirements.unshift({ key: 'MATCHING_COMPETENCY', label: `Matching ${firearm.required_competency.toLowerCase()} competency`, detail: 'The firearm cannot proceed without the matching competency category.', state: 'MISSING', required: true, documentType: null });
+      requirements.unshift({ key: 'MATCHING_COMPETENCY', label: `Matching ${firearm.required_competency.toLowerCase()} competency`, detail: 'The firearm cannot proceed without the matching competency category.', state: 'MISSING', required: true, documentType: null, delivery: 'DIGITAL' });
     }
 
     if (licence?.issue_date && licence.expiry_date) {
@@ -277,13 +317,13 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
         const recorded = new Date(`${licence.expiry_date}T00:00:00`);
         const difference = Math.abs(expected.getTime() - recorded.getTime()) / DAY_MS;
         if (difference > 31) {
-          requirements.unshift({ key: 'LICENCE_TERM_REVIEW', label: 'Licence term requires review', detail: `Section ${applicationCase.licence_section ?? licence.licence_section} is expected to use a ${expectedYears}-year term. Verify the recorded expiry date.`, state: 'UNVERIFIED', required: true, documentType: null });
+          requirements.unshift({ key: 'LICENCE_TERM_REVIEW', label: 'Licence term requires review', detail: `Section ${applicationCase.licence_section ?? licence.licence_section} is expected to use a ${expectedYears}-year term. Verify the recorded expiry date.`, state: 'UNVERIFIED', required: true, documentType: null, delivery: 'DIGITAL' });
         }
       }
     }
 
     const state = stateFor(requirements);
-    const required = requirements.filter((item) => item.required);
+    const required = requirements.filter((item) => item.required && item.delivery === 'DIGITAL');
     const satisfied = required.filter((item) => item.state === 'SATISFIED').length;
     const score = required.length ? Math.round((satisfied / required.length) * 100) : 0;
     const subject = firearm

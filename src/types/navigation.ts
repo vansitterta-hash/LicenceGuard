@@ -79,6 +79,9 @@ export type RootStackParamList = {
     applicationCaseId?: string;
     documentType?: import('./document').DocumentType;
     openUpload?: boolean;
+    evidenceKind?: 'SAFE_PHOTO' | 'SAFE_SECURING_PHOTO';
+    firearmId?: string;
+    documentScope?: import('./document').DocumentScope;
   };
 
   DocumentTemplates: {

@@ -13,7 +13,9 @@ export type ApplicationPackItemState =
   | 'COMPLETE'
   | 'MISSING'
   | 'EXPIRED'
-  | 'UNVERIFIED';
+  | 'UNVERIFIED'
+  | 'MANUAL_REQUIRED'
+  | 'PHYSICAL_REQUIRED';
 
 export type ApplicationPackItem = {
   key: string;
@@ -24,6 +26,7 @@ export type ApplicationPackItem = {
   state: ApplicationPackItemState;
   documentType: DocumentType | null;
   document: DocumentRecord | null;
+  delivery: import('./applicationReadiness').RequirementDelivery;
 };
 
 export type ApplicationPackManifest = {

@@ -24,6 +24,9 @@ export type DocumentUploadFile = {
 
 type ReusableRequirement = {
   documentType: DocumentType | null;
+  evidenceKind?: 'SAFE_PHOTO' | 'SAFE_SECURING_PHOTO';
+  requiresFirearmMatch?: boolean;
+  delivery?: 'DIGITAL' | 'MANUAL_PACK' | 'PHYSICAL_SUBMISSION';
 };
 
 type SupabaseOperationResult<T> = {
@@ -39,6 +42,8 @@ const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
 ]);
 const CROSS_CASE_CLIENT_DOCUMENT_TYPES = new Set<DocumentType>([
   'ID_COPY',
+  'MEMBERSHIP_CERTIFICATE',
+  'DEDICATED_STATUS',
 ]);
 
 function metadataCaseIds(metadata: Record<string, unknown>): string[] {
@@ -62,19 +67,19 @@ export async function linkReusableClientDocumentsToApplicationCase(input: {
   documents: DocumentRecord[];
   requirements: ReusableRequirement[];
 }): Promise<number> {
-  const requiredTypes = new Set(
-    input.requirements
-      .map((requirement) => requirement.documentType)
-      .filter((documentType): documentType is DocumentType =>
-        Boolean(documentType) && !GENERATED_APPLICATION_FORM_TYPES.has(documentType as DocumentType)
-      )
-  );
   const now = new Date().toISOString().slice(0, 10);
-  const reusable = Array.from(requiredTypes)
-    .map((documentType) =>
+  const reusable = input.requirements
+    .filter((requirement) =>
+      requirement.delivery !== 'MANUAL_PACK'
+      && !requirement.requiresFirearmMatch
+      && Boolean(requirement.documentType)
+      && !GENERATED_APPLICATION_FORM_TYPES.has(requirement.documentType as DocumentType)
+    )
+    .map((requirement) =>
       input.documents
         .filter((document) =>
-          document.document_type === documentType
+          document.document_type === requirement.documentType
+          && (!requirement.evidenceKind || document.metadata?.evidenceKind === requirement.evidenceKind)
           && document.lifecycle_status === 'ACTIVE'
           && (
             (document.document_scope === 'CLIENT' && !document.application_case_id)
@@ -88,7 +93,8 @@ export async function linkReusableClientDocumentsToApplicationCase(input: {
           return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
         })[0]
     )
-    .filter((document): document is DocumentRecord => Boolean(document));
+    .filter((document): document is DocumentRecord => Boolean(document))
+    .filter((document, index, documents) => documents.findIndex((item) => item.id === document.id) === index);
 
   for (const document of reusable) {
     const applicationCaseIds = [
@@ -136,6 +142,9 @@ export type UploadClientDocumentInput = {
   clientId: string;
   userId: string;
   applicationCaseId?: string;
+  firearmId?: string;
+  documentScope?: import('../types/document').DocumentScope;
+  metadata?: Record<string, unknown>;
   documentType: DocumentType;
   documentName: string;
   documentDate?: string;
@@ -303,12 +312,12 @@ export async function uploadClientDocument(
       dealer_id: input.dealerId,
       client_id: input.clientId,
       competency_id: null,
-      firearm_id: null,
+      firearm_id: input.firearmId ?? null,
       firearm_licence_id: null,
       application_case_id: input.applicationCaseId ?? null,
       parent_document_id: null,
       document_type: input.documentType,
-      document_scope: input.applicationCaseId ? 'APPLICATION_CASE' : 'CLIENT',
+      document_scope: input.documentScope ?? (input.applicationCaseId ? 'APPLICATION_CASE' : 'CLIENT'),
       lifecycle_status: 'ACTIVE',
       document_name: input.documentName.trim(),
       document_date: emptyToNull(input.documentDate),
@@ -326,7 +335,7 @@ export async function uploadClientDocument(
       is_verified: false,
       is_generated: false,
       notes: emptyToNull(input.notes),
-      metadata: {},
+      metadata: input.metadata ?? {},
       uploaded_by: input.userId,
     };
     stage = 'insert-start';

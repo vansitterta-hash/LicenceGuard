@@ -407,6 +407,9 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
           </View>
 
           <TextField label={values.acquisitionSource === 'PRIVATE_SELLER' ? 'Seller name' : 'Dealer name'} value={values.supplierName} onChangeText={(value) => setField('supplierName', value)} placeholder="Optional if already contained in the uploaded sale document" />
+          <TextField label="ID or registration number" value={values.supplierIdOrRegistration} onChangeText={(value) => setField('supplierIdOrRegistration', value)} />
+          <TextField label="Contact number" value={values.supplierContact} onChangeText={(value) => setField('supplierContact', value)} />
+          <TextField label="Dealer or seller licence number" value={values.supplierLicenceNumber} onChangeText={(value) => setField('supplierLicenceNumber', value)} />
           <TextField label="Invoice or sale reference" value={values.saleOrInvoiceReference} onChangeText={(value) => setField('saleOrInvoiceReference', value)} placeholder="Optional" />
         </Card>
       ) : null}

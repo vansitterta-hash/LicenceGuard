@@ -16,18 +16,16 @@ export function buildApplicationPackManifest(data: ApplicationAutofillPackage): 
   if (data.firearm) {
     items.push(item('COMPETENCY_CERTIFICATE', 'Matching competency certificate', 'COMPETENCY_CERTIFICATE', true, 'Competency must match the firearm category.'));
     items.push(item('MOTIVATION', 'Application motivation', 'MOTIVATION', true, 'Explains the lawful need and intended use.'));
-    items.push(item('SAFE_AFFIDAVIT', 'Safe storage evidence / affidavit', 'SAFE_AFFIDAVIT', true, 'Supports compliant firearm storage.'));
+    items.push(item('SAFE_PHOTOS', 'Safe photographs', 'SUPPORTING_DOCUMENT', true, 'Photographs showing the firearm safe.'));
+    items.push(item('SAFE_SECURING_PHOTOS', 'Safe securing/anchoring photographs', 'SUPPORTING_DOCUMENT', true, 'Photographs showing how the safe is secured.'));
   }
 
   if (data.supplier?.acquisitionSource === 'DEALER') {
-    items.push(item('PURCHASE_INVOICE', 'Dealer invoice / sale document', 'PURCHASE_INVOICE', true, 'Identifies the firearm, dealer and purchaser.'));
-    items.push(item('DEALER_STOCK_DOCUMENT', 'Dealer stock / transfer document', 'DEALER_STOCK_DOCUMENT', true, 'Supports dealer transfer particulars.'));
+    items.push(item('ACQUISITION_EVIDENCE', 'Dealer acquisition evidence', 'PURCHASE_INVOICE', true, 'Dealer invoice, sale document, SAP 350 or equivalent associated with this firearm.'));
   }
 
   if (data.supplier?.acquisitionSource === 'PRIVATE_SELLER') {
-    items.push(item('SELLER_ID_COPY', 'Private seller ID copy', 'SELLER_ID_COPY', true, 'Identifies the private seller.'));
-    items.push(item('SELLER_LICENCE_COPY', 'Seller firearm licence copy', 'SELLER_LICENCE_COPY', true, 'Confirms the seller is licensed for the firearm.'));
-    items.push(item('SALE_AGREEMENT', 'Private sale agreement', 'PURCHASE_INVOICE', true, 'Records the lawful private sale.'));
+    items.push(item('ACQUISITION_EVIDENCE', 'Private-sale acquisition evidence', 'PURCHASE_INVOICE', true, 'Signed sale agreement or equivalent evidence associated with this firearm and seller.'));
   }
 
   const section = data.firearm?.licenceSection.replace(/\D/g, '') ?? '';

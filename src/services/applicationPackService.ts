@@ -32,11 +32,21 @@ const db = supabase as any;
 
 function documentMatchesCase(
   document: DocumentRecord,
+  requirement: ReadinessRequirement,
   applicationCaseId: string,
   competencyId: string | null,
   firearmId: string | null,
   firearmLicenceId: string | null
 ): boolean {
+  if (requirement.evidenceKind && document.metadata?.evidenceKind !== requirement.evidenceKind) {
+    return false;
+  }
+
+  if (requirement.requiresFirearmMatch) {
+    return Boolean(firearmId && document.firearm_id === firearmId)
+      && (!document.application_case_id || documentReferencesApplicationCase(document, applicationCaseId));
+  }
+
   if (documentReferencesApplicationCase(document, applicationCaseId)) {
     return true;
   }
@@ -90,11 +100,11 @@ function findRequirementDocument(
   const candidates = documents
     .filter(
       (document) =>
-        document.document_type ===
-          requirement.documentType &&
+        (requirement.acceptableDocumentTypes ?? [requirement.documentType]).includes(document.document_type) &&
         document.lifecycle_status === 'ACTIVE' &&
         documentMatchesCase(
           document,
+          requirement,
           applicationCaseId,
           competencyId,
           firearmId,
@@ -127,6 +137,10 @@ function mapRequirementState(
       return 'UNVERIFIED';
     case 'PENDING_GENERATION':
       return 'MISSING';
+    case 'MANUAL_REQUIRED':
+      return 'MANUAL_REQUIRED';
+    case 'PHYSICAL_REQUIRED':
+      return 'PHYSICAL_REQUIRED';
     default:
       return 'MISSING';
   }
@@ -152,7 +166,7 @@ function buildBlockingReasons(
   return items
     .filter(
       (item) =>
-        item.required &&
+        item.required && item.delivery === 'DIGITAL' &&
         (item.state === 'MISSING' ||
           item.state === 'EXPIRED' ||
           item.state === 'UNVERIFIED')
@@ -168,6 +182,13 @@ function buildBlockingReasons(
 
       return `${item.label} is missing.`;
     });
+}
+
+function packItemStateLabel(state: ApplicationPackItemState): string {
+  if (state === 'COMPLETE') return 'DIGITALLY INCLUDED';
+  if (state === 'MANUAL_REQUIRED') return 'TO PRINT / ADD MANUALLY';
+  if (state === 'PHYSICAL_REQUIRED') return 'PHYSICAL SUBMISSION ITEM';
+  return state;
 }
 
 export async function buildApplicationPackManifest(
@@ -206,6 +227,7 @@ export async function buildApplicationPackManifest(
         label: requirement.label,
         detail: requirement.detail,
         required: requirement.required,
+        delivery: requirement.delivery,
         state: mapRequirementState(
           requirement.state
         ),
@@ -328,7 +350,7 @@ function manifestHtml(
             <div class="detail">${escapeHtml(item.detail)}</div>
           </td>
           <td>${item.required ? 'Required' : 'Recommended'}</td>
-          <td>${escapeHtml(item.state)}</td>
+          <td>${escapeHtml(packItemStateLabel(item.state))}</td>
           <td>${escapeHtml(item.document?.document_name ?? '—')}</td>
           <td>${item.document?.is_verified ? 'Verified' : item.document ? 'Not verified' : '—'}</td>
         </tr>`
@@ -535,7 +557,7 @@ function drawChecklistItem(
   bold: PDFFont,
   rgb: (red: number, green: number, blue: number) => any
 ): void {
-  const state = item.state === 'COMPLETE' ? 'INCLUDED' : item.state;
+  const state = packItemStateLabel(item.state);
   page.drawRectangle({ x: 44, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.25, 0.25, 0.25) });
   if (item.state === 'COMPLETE') page.drawText('X', { x: 46, y, size: 9, font: bold });
   page.drawText(`${item.order}. ${item.label}`, { x: 68, y: y + 1, size: 10, font: bold, maxWidth: 420 });
@@ -709,7 +731,7 @@ export async function generateAndArchiveApplicationPack(input: {
   const skippedDocuments: Array<{ documentId: string; name: string; reason: string }> = [];
 
   for (const item of manifest.items.sort((a, b) => a.order - b.order)) {
-    if (!item.document) continue;
+    if (item.delivery !== 'DIGITAL' || !item.document) continue;
     const packDocument = item.document.document_type === 'MOTIVATION' && isDocxDocument(item.document)
       ? await createMotivationPdfWorkingCopy(
           item.document,

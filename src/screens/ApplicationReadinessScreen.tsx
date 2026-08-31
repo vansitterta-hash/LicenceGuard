@@ -164,9 +164,15 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     (requirement: ReadinessRequirement) => {
       if (!applicationCase || !requirement.documentType) return undefined;
 
-      const candidates = applicationDocuments.filter(
-        (document) => document.document_type === requirement.documentType
-      );
+      const acceptedTypes = requirement.acceptableDocumentTypes ?? [requirement.documentType];
+      const candidates = applicationDocuments.filter((document) => {
+        if (!acceptedTypes.includes(document.document_type)) return false;
+        if (requirement.evidenceKind && document.metadata?.evidenceKind !== requirement.evidenceKind) return false;
+        if (requirement.requiresFirearmMatch) {
+          return Boolean(applicationCase.firearmId && document.firearm_id === applicationCase.firearmId);
+        }
+        return true;
+      });
 
       return (
         candidates.find(
@@ -338,9 +344,11 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   }
 
   const outstanding = applicationCase.requirements.filter(
-    (item) => item.required && item.state !== 'SATISFIED' && item.state !== 'NOT_APPLICABLE'
+    (item) => item.required && item.delivery === 'DIGITAL' && item.state !== 'SATISFIED' && item.state !== 'NOT_APPLICABLE'
   );
-  const completed = applicationCase.requirements.filter((item) => item.state === 'SATISFIED');
+  const completed = applicationCase.requirements.filter((item) => item.delivery === 'DIGITAL' && item.state === 'SATISFIED');
+  const manualPackItems = applicationCase.requirements.filter((item) => item.delivery === 'MANUAL_PACK');
+  const physicalSubmissionItems = applicationCase.requirements.filter((item) => item.delivery === 'PHYSICAL_SUBMISSION');
   const ready = applicationCase.readyToGenerate;
   const motivationSuggestions = suggestionResult?.suggestions.filter((item) => item.kind === 'MOTIVATION') ?? [];
   const informationSuggestions = suggestionResult?.suggestions.filter((item) => item.kind === 'FIREARM_INFORMATION') ?? [];
@@ -365,6 +373,9 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         applicationCaseId: applicationCase.caseId,
         documentType: requirement.documentType,
         openUpload: true,
+        evidenceKind: requirement.evidenceKind,
+        firearmId: requirement.requiresFirearmMatch ? applicationCase.firearmId ?? undefined : undefined,
+        documentScope: requirement.evidenceKind ? 'CLIENT' : 'APPLICATION_CASE',
       });
       return;
     }
@@ -393,6 +404,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const supportingRequirements = applicationCase.requirements.filter(
     (requirement) =>
       requirement.required &&
+      requirement.delivery === 'DIGITAL' &&
       requirement.documentType &&
       requirement.documentType !== 'MOTIVATION' &&
       requirement.documentType !== 'FIREARM_LICENCE_APPLICATION_FORM' &&
@@ -708,6 +720,32 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         </Text>
       </Card>
 
+      {manualPackItems.length > 0 ? (
+        <Card title="To print / add manually" subtitle="These items do not block digital pack generation, but must be added before SAPS submission.">
+          <View style={styles.completedList}>
+            {manualPackItems.map((item) => (
+              <View key={item.key} style={styles.completedRow}>
+                <FileText color={Colors.warning} size={16} />
+                <Text style={styles.completedLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {physicalSubmissionItems.length > 0 ? (
+        <Card title="Physical submission items" subtitle="These original physical items are not stored as digital attachments.">
+          <View style={styles.completedList}>
+            {physicalSubmissionItems.map((item) => (
+              <View key={item.key} style={styles.completedRow}>
+                <FileText color={Colors.silver} size={16} />
+                <Text style={styles.completedLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
       <Card
         padding="large"
         style={[
@@ -858,6 +896,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                       >
                         {requirement.state === 'SATISFIED'
                           ? 'Attached and verified'
+                          : requirement.state === 'MANUAL_REQUIRED'
+                            ? 'To print / add manually'
+                          : requirement.state === 'PHYSICAL_REQUIRED'
+                            ? 'Physical submission item'
                           : requirement.state === 'UNVERIFIED'
                             ? 'Awaiting verification'
                             : requirement.state === 'PENDING_GENERATION'
@@ -1098,6 +1140,10 @@ function SuggestionGroup({ title, items, onView }: { title: string; items: Appli
 function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequirement; onPress: () => void }) {
   const stateLabel = requirement.state === 'EXPIRED'
     ? 'Expired'
+    : requirement.state === 'MANUAL_REQUIRED'
+      ? 'Add manually'
+    : requirement.state === 'PHYSICAL_REQUIRED'
+      ? 'Physical item'
     : requirement.state === 'UNVERIFIED'
       ? 'Confirm'
       : requirement.state === 'PENDING_GENERATION'

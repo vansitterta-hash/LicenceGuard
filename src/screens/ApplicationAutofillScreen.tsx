@@ -9,6 +9,7 @@ import Screen from '../components/Screen';
 import TextField from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
 import { buildApplicationAutofillPackage } from '../services/applicationAutofillService';
+import { updateApplicationSupplierDetails } from '../services/applicationCaseService';
 import {
   archiveCompletedApplication,
   archiveOfficialApplicationPdf,
@@ -37,6 +38,7 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [savingSupplier, setSavingSupplier] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,6 +106,30 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     }
   };
 
+  const saveSupplier = async () => {
+    if (!data?.supplier || !values || !dealerProfile || !user) return;
+    setSavingSupplier(true);
+    try {
+      await updateApplicationSupplierDetails({
+        applicationCaseId: route.params.applicationCaseId,
+        dealerId: dealerProfile.dealerId,
+        clientId: route.params.clientId,
+        userId: user.id,
+        supplierName: values.supplierName,
+        supplierIdOrRegistration: values.supplierIdOrRegistration,
+        supplierContact: values.supplierContact,
+        supplierLicenceNumber: values.supplierLicenceNumber,
+        saleOrInvoiceReference: values.saleOrInvoiceReference,
+      });
+      await load();
+      Alert.alert('Seller details saved', 'The acquisition details were saved to this application and will remain after refresh.');
+    } catch (error) {
+      Alert.alert('Unable to save seller details', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
+
   if (loading || !data || !values) {
     return <Screen scroll={false}><View style={styles.loading}><ActivityIndicator color={Colors.primary} size="large" /><Text style={styles.muted}>Mapping application data...</Text></View></Screen>;
   }
@@ -152,18 +178,19 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
       ]} values={values} setField={setField} /> : null}
       {data.supplier ? <EditSection title="Dealer or private seller" fields={[
         ['Name', 'supplierName'], ['ID / registration', 'supplierIdOrRegistration'], ['Contact', 'supplierContact'], ['Dealer / seller licence number', 'supplierLicenceNumber'], ['Sale / invoice reference', 'saleOrInvoiceReference'],
-      ]} values={values} setField={setField} /> : null}
+      ]} values={values} setField={setField} footer={<Button loading={savingSupplier} disabled={!dealerProfile || !user} onPress={() => void saveSupplier()} title="Save seller details" />} /> : null}
     </Screen>
   );
 }
 
-function EditSection({ title, fields, values, setField }: {
+function EditSection({ title, fields, values, setField, footer }: {
   title: string;
   fields: Array<[string, ReviewKey, boolean?]>;
   values: ApplicationReviewValues;
   setField: (key: ReviewKey, value: string) => void;
+  footer?: React.ReactNode;
 }) {
-  return <Card title={title}><View style={styles.grid}>{fields.map(([label, key, multiline]) => <TextField key={key} containerStyle={multiline ? styles.fullWidth : styles.field} label={label} multiline={multiline} onChangeText={(value) => setField(key, value)} value={values[key]} />)}</View></Card>;
+  return <Card title={title}><View style={styles.grid}>{fields.map(([label, key, multiline]) => <TextField key={key} containerStyle={multiline ? styles.fullWidth : styles.field} label={label} multiline={multiline} onChangeText={(value) => setField(key, value)} value={values[key]} />)}</View>{footer ? <View style={styles.editButton}>{footer}</View> : null}</Card>;
 }
 
 const styles = StyleSheet.create({

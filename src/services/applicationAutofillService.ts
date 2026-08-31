@@ -101,6 +101,14 @@ function validate(
       blocking('licenceSection', 'Licence section', 'Select the applicable Firearms Control Act licence section.');
     }
 
+    if (applicationCase.acquisition_source === 'DEALER' && !text(applicationCase.supplier_name)) {
+      blocking('supplierName', 'Dealer name', 'Record the supplying dealer name.');
+    }
+    if (applicationCase.acquisition_source === 'PRIVATE_SELLER') {
+      if (!text(applicationCase.supplier_name)) blocking('supplierName', 'Seller name', 'Record the private seller name.');
+      if (!text(applicationCase.supplier_id_or_registration)) blocking('supplierId', 'Seller ID number', 'Record the private seller identity number.');
+    }
+
     if (
       ['FIREARM_LICENCE_RENEWAL', 'FIREARM_LICENCE_REAPPLICATION'].includes(
         applicationCase.application_type
