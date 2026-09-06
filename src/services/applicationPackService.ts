@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { assertRequiredDigitalDocumentMerged } from '../utils/applicationPackPolicy';
 import { getClientApplicationReadiness } from './applicationReadinessService';
 import { getApplicationCase } from './applicationCaseService';
 import { getClient } from './clientService';
@@ -744,13 +745,8 @@ export async function generateAndArchiveApplicationPack(input: {
     const result = await appendStoredDocument(pdf, packDocument, pdfLib);
     if (result.included) {
       includedDocumentIds.push(packDocument.id);
-    } else if (item.required && item.document.document_type === 'MOTIVATION') {
-      throw new Error(
-        `The required motivation "${item.document.document_name}" could not be included in the final pack. ${
-          result.reason ?? 'The PDF working copy could not be merged.'
-        }`
-      );
     } else {
+      assertRequiredDigitalDocumentMerged({ required: item.required, label: item.label, documentName: packDocument.document_name, reason: result.reason });
       skippedDocuments.push({
         documentId: packDocument.id,
         name: packDocument.document_name,

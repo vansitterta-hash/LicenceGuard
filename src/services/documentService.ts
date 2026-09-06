@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { assertSupportedSafeEvidenceFormat } from '../utils/documentFormatPolicy';
 
 import type {
   ClientDocumentSummary,
@@ -257,6 +258,10 @@ export async function uploadClientDocument(
     throw new Error(
       'Passport photographs are physical submission items and are not stored in LicenceGuard.'
     );
+  }
+  const evidenceKind = input.metadata?.evidenceKind;
+  if (evidenceKind === 'SAFE_PHOTO' || evidenceKind === 'SAFE_SECURING_PHOTO') {
+    assertSupportedSafeEvidenceFormat(input.file);
   }
   let stage = 'file-ready';
   const timestamp = new Date()
