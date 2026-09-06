@@ -102,23 +102,6 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         getClientApplicationReadiness(route.params.clientId),
         listClientDocuments(route.params.clientId),
       ]);
-      const selectedCase = readiness.cases.find(
-        (item) => item.caseId === route.params.applicationCaseId
-      );
-      if (selectedCase && user?.id) {
-        const linkedCount = await linkReusableClientDocumentsToApplicationCase({
-          applicationCaseId: selectedCase.caseId,
-          userId: user.id,
-          documents: clientDocuments,
-          requirements: selectedCase.requirements,
-        });
-        if (linkedCount > 0) {
-          [readiness, clientDocuments] = await Promise.all([
-            getClientApplicationReadiness(route.params.clientId),
-            listClientDocuments(route.params.clientId),
-          ]);
-        }
-      }
       setData(readiness);
       setDocuments(clientDocuments);
     } catch (error) {
@@ -129,7 +112,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     } finally {
       setLoading(false);
     }
-  }, [route.params.applicationCaseId, route.params.clientId, user?.id]);
+  }, [route.params.clientId]);
 
   useEffect(() => {
     void loadData();
