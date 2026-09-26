@@ -20,11 +20,17 @@ export type DocumentLayoutElement = {
   align?: DocumentLayoutTextAlign;
   uppercase?: boolean;
   autofillPolicy?: DocumentLayoutAutofillPolicy;
+  officialUse?: boolean;
+  protected?: boolean;
+  disableAutofill?: boolean;
   boxCount?: number;
   boxWidth?: number;
+  boxSpacing?: number;
   separatorAfter?: number[];
   separatorWidth?: number;
   characterSet?: 'DIGITS' | 'ALPHANUMERIC';
+  allowLetters?: boolean;
+  renderAs?: 'TEXT' | 'CHARACTER_BOXES';
   choiceValue?: string;
   mark?: string;
   conditionFieldId?: DocumentFieldId;

@@ -4,6 +4,100 @@ import { resolveDocumentField } from './documentEngine';
 import type { DocumentEngineContext, DocumentTemplateDefinition } from '../types/documentEngine';
 import type { DocumentLayoutElement } from '../types/documentLayout';
 
+export type BoxedTextEntry = {
+  character: string;
+  x: number;
+  y: number;
+  width: number;
+  centered: boolean;
+  boxIndex: number;
+};
+
+export type BoxedTextLayout = {
+  characters: BoxedTextEntry[];
+  totalWidth: number;
+};
+
+export function isOfficialUseField(element: {
+  fieldId?: string;
+  officialUse?: boolean;
+  protected?: boolean;
+  disableAutofill?: boolean;
+  autofillPolicy?: 'APPLICANT' | 'ROUTING' | 'PROTECTED_OFFICIAL';
+}): boolean {
+  if (element.autofillPolicy === 'PROTECTED_OFFICIAL' || element.officialUse || element.protected || element.disableAutofill) {
+    return true;
+  }
+  const fieldId = element.fieldId ?? '';
+  if (!fieldId) return false;
+  const officialTokens = [
+    'official',
+    'dateReceived',
+    'dateStamp',
+    'openedDate',
+    'saps86',
+    'registerNumber',
+    'persal',
+    'decision',
+    'approval',
+    'refusal',
+    'recommendation',
+    'signature',
+    'receipt',
+    'processing',
+  ];
+  return officialTokens.some((token) => fieldId.includes(token));
+}
+
+export function normaliseBoxedValue(value: string, options: { boxCount?: number; allowLetters?: boolean } = {}): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  const allowLetters = options.allowLetters ?? true;
+  const pattern = allowLetters ? /[A-Za-z0-9]/g : /\d/g;
+  const filtered = raw.match(pattern)?.join('') ?? '';
+  const limit = typeof options.boxCount === 'number' && options.boxCount > 0 ? options.boxCount : filtered.length;
+  return filtered.slice(0, limit);
+}
+
+export function computeBoxedTextLayout(input: {
+  value: string;
+  boxCount: number;
+  x: number;
+  y: number;
+  width?: number;
+  boxWidth?: number;
+  boxSpacing?: number;
+  fontSize?: number;
+  allowLetters?: boolean;
+}): BoxedTextLayout {
+  const boxCount = Math.max(0, input.boxCount ?? 0);
+  const boxSpacing = input.boxSpacing ?? 0;
+  const fontSize = input.fontSize ?? 9;
+  const valueText = normaliseBoxedValue(input.value, { boxCount, allowLetters: input.allowLetters ?? true });
+  const logicalWidth = typeof input.boxWidth === 'number' && input.boxWidth > 0
+    ? input.boxWidth
+    : (typeof input.width === 'number' && input.width > 0 ? Math.max(0, input.width / Math.max(1, boxCount)) : fontSize * 0.7);
+  const stepWidth = logicalWidth + boxSpacing;
+  const characters = Array.from({ length: boxCount }, (_, index) => {
+    const character = valueText[index] ?? '';
+    const boxStartX = input.x + index * stepWidth;
+    const charX = character ? boxStartX + Math.max(0, (logicalWidth - Math.max(fontSize * 0.5, fontSize * 0.6)) / 2) : boxStartX;
+    return {
+      character,
+      x: charX,
+      y: input.y,
+      width: logicalWidth,
+      centered: true,
+      boxIndex: index,
+    } satisfies BoxedTextEntry;
+  });
+
+  return {
+    characters,
+    totalWidth: boxCount * stepWidth,
+  };
+}
+
 function splitText(value: string, font: PDFFont, size: number, maxWidth?: number, maxLines = 1): string[] {
   if (!maxWidth) return [value];
   const truncationMarker = '...';
@@ -55,6 +149,7 @@ function splitText(value: string, font: PDFFont, size: number, maxWidth?: number
 }
 
 function resolveElementValue(element: DocumentLayoutElement, context: DocumentEngineContext): string {
+  if (isOfficialUseField(element)) return '';
   const sourceValue = resolveDocumentField(element.fieldId, context);
   if (element.kind === 'CHECKBOX') return sourceValue === element.choiceValue ? element.mark ?? 'X' : '';
   return element.uppercase ? sourceValue.toUpperCase() : sourceValue;
@@ -110,7 +205,6 @@ export async function renderOfficialPdfTemplate(input: {
   if (!response.ok) response = await fetch(layout.sourceUrl || input.template.sourceUrl);
   if (!response.ok) throw new Error(`Unable to download the official ${input.template.code} template. Check your connection and try again.`);
 
-  // Avoid tslib 1.x's ESM default-import bridge, which fails under Metro Web.
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib/cjs/index.js');
   const pdf = await PDFDocument.load(await response.arrayBuffer());
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -118,7 +212,7 @@ export async function renderOfficialPdfTemplate(input: {
   if (pages.length < layout.pageCount) throw new Error(`${layout.id} expects ${layout.pageCount} pages, but the downloaded template has ${pages.length}.`);
 
   for (const element of layout.elements) {
-    if (element.autofillPolicy === 'PROTECTED_OFFICIAL') continue;
+    if (isOfficialUseField(element)) continue;
     const page = pages[element.page - 1];
     if (!page) continue;
     if (
@@ -128,6 +222,7 @@ export async function renderOfficialPdfTemplate(input: {
     const value = resolveElementValue(element, input.context);
     if (!value) continue;
     const size = element.fontSize ?? 9;
+
     if (element.kind === 'BOXED_TEXT') {
       const positions = getBoxCharacterPositions(element);
       boxedCharacters(value, element).forEach((character, index) => {
@@ -142,6 +237,32 @@ export async function renderOfficialPdfTemplate(input: {
       });
       continue;
     }
+
+    if (element.renderAs === 'CHARACTER_BOXES' || (typeof element.boxCount === 'number' && element.boxCount > 0)) {
+      const boxed = computeBoxedTextLayout({
+        value,
+        boxCount: element.boxCount ?? value.length,
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        boxWidth: element.boxWidth,
+        boxSpacing: element.boxSpacing,
+        fontSize: size,
+        allowLetters: element.allowLetters ?? true,
+      });
+      boxed.characters.forEach((entry) => {
+        if (!entry.character) return;
+        page.drawText(entry.character, {
+          x: entry.x,
+          y: entry.y,
+          size,
+          font,
+          color: rgb(0, 0, 0),
+        });
+      });
+      continue;
+    }
+
     const lines = splitText(value, font, size, element.width, element.maxLines ?? 1);
     if (element.fieldId.startsWith('applicant.declarations.') && element.kind === 'TEXT' && lines.join(' ') !== value.trim().replace(/\s+/g, ' ')) {
       throw new Error(`SAPS 271 declaration field ${element.fieldId} exceeds the available form space. Review the detail before generating; declaration text cannot be truncated.`);

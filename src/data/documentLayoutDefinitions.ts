@@ -61,7 +61,7 @@ export const DOCUMENT_LAYOUT_DEFINITIONS: DocumentLayoutDefinition[] = [
     elements: [
       ...SAPS517_DECLARATION_ELEMENTS,
       { id: 's517-application-reference', kind: 'TEXT', fieldId: 'application.reference', page: 1, x: 374, y: 649, width: 185, fontSize: 8, autofillPolicy: 'PROTECTED_OFFICIAL' },
-      { id: 's517-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 594, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL' },
+      { id: 's517-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 594, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL', officialUse: true },
       { id: 's517-province', kind: 'TEXT', fieldId: 'applicant.province', page: 1, x: 231, y: 534, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
       { id: 's517-police-station', kind: 'TEXT', fieldId: 'application.policeStation', page: 1, x: 231, y: 498, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
 
@@ -99,7 +99,7 @@ export const DOCUMENT_LAYOUT_DEFINITIONS: DocumentLayoutDefinition[] = [
     elements: [
       ...SAPS517A_DECLARATION_ELEMENTS,
       { id: 's517a-application-reference', kind: 'TEXT', fieldId: 'application.reference', page: 1, x: 371, y: 649, width: 185, fontSize: 8, autofillPolicy: 'PROTECTED_OFFICIAL' },
-      { id: 's517a-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 594, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL' },
+      { id: 's517a-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 594, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL', officialUse: true },
       { id: 's517a-province', kind: 'TEXT', fieldId: 'applicant.province', page: 1, x: 231, y: 530, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
       { id: 's517a-police-station', kind: 'TEXT', fieldId: 'application.policeStation', page: 1, x: 231, y: 494, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
 
@@ -140,7 +140,7 @@ export const DOCUMENT_LAYOUT_DEFINITIONS: DocumentLayoutDefinition[] = [
     status: 'ACTIVE',
     elements: [
       { id: 's517g-application-reference', kind: 'TEXT', fieldId: 'application.reference', page: 1, x: 371, y: 651, width: 185, fontSize: 8, autofillPolicy: 'PROTECTED_OFFICIAL' },
-      { id: 's517g-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 596, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL' },
+      { id: 's517g-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 596, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL', officialUse: true },
       { id: 's517g-province', kind: 'TEXT', fieldId: 'applicant.province', page: 1, x: 231, y: 534, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
       { id: 's517g-police-station', kind: 'TEXT', fieldId: 'application.policeStation', page: 1, x: 231, y: 507, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
 
@@ -186,7 +186,7 @@ export const DOCUMENT_LAYOUT_DEFINITIONS: DocumentLayoutDefinition[] = [
     status: 'ACTIVE',
     elements: [
       { id: 's518a-application-reference', kind: 'TEXT', fieldId: 'application.reference', page: 1, x: 371, y: 630, width: 185, fontSize: 8, autofillPolicy: 'PROTECTED_OFFICIAL' },
-      { id: 's518a-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 575, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL' },
+      { id: 's518a-opened-date', kind: 'TEXT', fieldId: 'application.openedDate', page: 1, x: 168, y: 575, width: 108, fontSize: 9, align: 'CENTER', autofillPolicy: 'PROTECTED_OFFICIAL', officialUse: true },
       { id: 's518a-province', kind: 'TEXT', fieldId: 'applicant.province', page: 1, x: 231, y: 513, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
       { id: 's518a-police-station', kind: 'TEXT', fieldId: 'application.policeStation', page: 1, x: 231, y: 477, width: 325, fontSize: 9, autofillPolicy: 'ROUTING' },
 
