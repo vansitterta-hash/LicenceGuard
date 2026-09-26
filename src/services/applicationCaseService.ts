@@ -1,4 +1,7 @@
+import { removeSafeRecord } from '../services/safeDeletionService';
+import { enqueueDraftSave, waitForDraftSave } from '../utils/draftSaveQueue';
 import { supabase } from '../lib/supabase';
+import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import {
   CLOSED_APPLICATION_CASE_STATUSES,
   getApplicationCaseTypeLabel,
@@ -84,14 +87,15 @@ function calculateDaysUntil(
 function describeFirearm(
   firearm: FirearmRow
 ): string {
-  return [
+  const identity = [
     firearm.make,
     firearm.model,
     firearm.calibre,
-    firearm.serial_number,
   ]
     .filter(Boolean)
-    .join(' • ');
+    .join(' ');
+
+  return `${identity} - Serial ${firearm.serial_number}`;
 }
 
 function formatCompetencyCategory(
@@ -313,6 +317,7 @@ export async function listClientApplicationCases(
 export async function getApplicationCase(
   applicationCaseId: string
 ): Promise<ApplicationCaseListItem> {
+  await waitForDraftSave(applicationCaseId);
   const { data, error } = await supabase
     .from('application_cases')
     .select('*')
@@ -375,7 +380,7 @@ export async function getApplicationCaseSubjectOptions(
           ? `Licence ${
               licence.licence_number ??
               'not recorded'
-            } • Expires ${licence.expiry_date}`
+            } - Expires ${licence.expiry_date}`
           : 'No current licence recorded',
       };
     });
@@ -419,7 +424,7 @@ function buildPayload(
         : null,
 
     competency_id:
-      competencyApplication
+      competencyApplication || isFirearmApplicationType(values.applicationType)
         ? emptyToNull(values.competencyId)
         : null,
 
@@ -507,13 +512,73 @@ function buildPayload(
   };
 }
 
+export async function createOrResumeFirearmApplicationDraft(
+  dealerId: string,
+  clientId: string,
+  userId: string,
+  values: ApplicationCaseFormValues
+): Promise<ApplicationCaseListItem> {
+  assertApplicationTypeSupportedInBeta(values.applicationType);
+
+  if (!isFirearmApplicationType(values.applicationType) || !values.firearmId.trim()) {
+    throw new Error('Select a firearm before starting an application draft.');
+  }
+
+  const { data, error } = await (supabase as any).rpc(
+    'create_or_resume_firearm_application_draft',
+    {
+      p_dealer_id: dealerId,
+      p_client_id: clientId,
+      p_application_type: values.applicationType,
+      p_firearm_id: values.firearmId,
+      p_firearm_licence_id: emptyToNull(values.firearmLicenceId),
+      p_licence_section: values.licenceSection,
+      p_acquisition_source: values.acquisitionSource,
+      p_opened_date: values.openedDate,
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const applicationCase = (Array.isArray(data) ? data[0] : data) as ApplicationCaseRecord | null;
+  if (!applicationCase) {
+    throw new Error('The application draft could not be created or resumed.');
+  }
+
+  const context = await loadApplicationCaseContext(clientId);
+  return mapApplicationCase(applicationCase, context);
+}
+export async function findWorkingCompetencyDraft(dealerId: string, clientId: string, type: ApplicationCaseType): Promise<ApplicationCaseListItem | null> {
+  const { data, error } = await supabase.from('application_cases').select('*')
+    .eq('dealer_id', dealerId).eq('client_id', clientId).eq('application_type', type)
+    .eq('status', 'NOT_STARTED').order('created_at', { ascending: true }).order('id', { ascending: true }).limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0] ? mapApplicationCase(data[0] as ApplicationCaseRecord, await loadApplicationCaseContext(clientId)) : null;
+}
+
 export async function createApplicationCase(
   dealerId: string,
   clientId: string,
   userId: string,
   values: ApplicationCaseFormValues
 ): Promise<ApplicationCaseListItem> {
+  assertApplicationTypeSupportedInBeta(values.applicationType);
   validateRequiredLinks(values);
+  if (values.status === 'NOT_STARTED' && isFirearmApplicationType(values.applicationType)) {
+    return createOrResumeFirearmApplicationDraft(dealerId, clientId, userId, values);
+  }
+  if (values.status === 'NOT_STARTED' && isCompetencyApplicationType(values.applicationType)) {
+    const { data, error } = await supabase.rpc('create_or_resume_competency_application_draft', {
+      p_dealer_id: dealerId, p_client_id: clientId, p_values: buildPayload(dealerId, clientId, userId, values),
+    });
+    if (error) throw new Error(error.code === 'PGRST202'
+      ? 'Starting competency applications is temporarily unavailable. Please contact your administrator.' : error.message);
+    const item = (Array.isArray(data) ? data[0] : data) as ApplicationCaseRecord;
+    if (!item) throw new Error('The application could not be started.');
+    return mapApplicationCase(item, await loadApplicationCaseContext(clientId));
+  }
 
   const { data, error } = await supabase
     .from('application_cases')
@@ -542,13 +607,18 @@ export async function createApplicationCase(
   );
 }
 
-export async function updateApplicationCase(
+export function updateApplicationCase(...args: Parameters<typeof persistApplicationCase>): Promise<ApplicationCaseListItem> {
+  return enqueueDraftSave(args[0], () => persistApplicationCase(...args));
+}
+
+async function persistApplicationCase(
   applicationCaseId: string,
   dealerId: string,
   clientId: string,
   userId: string,
   values: ApplicationCaseFormValues
 ): Promise<ApplicationCaseListItem> {
+  assertApplicationTypeSupportedInBeta(values.applicationType);
   validateRequiredLinks(values);
 
   const { data, error } = await supabase
@@ -563,6 +633,9 @@ export async function updateApplicationCase(
     )
     .eq('id', applicationCaseId)
     .eq('dealer_id', dealerId)
+    .eq('client_id', clientId)
+    .eq('application_type', values.applicationType)
+    .not('status', 'in', '("SUBMITTED","APPROVED","DECLINED","WITHDRAWN","CLOSED")')
     .select('*')
     .single();
 
@@ -604,6 +677,7 @@ export async function updateApplicationSupplierDetails(input: {
     .eq('id', input.applicationCaseId)
     .eq('dealer_id', input.dealerId)
     .eq('client_id', input.clientId)
+    .not('status', 'in', '("SUBMITTED","APPROVED","DECLINED","WITHDRAWN","CLOSED")')
     .select('*')
     .single();
 
@@ -615,11 +689,13 @@ export async function deleteApplicationCase(
   applicationCaseId: string,
   dealerId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('application_cases')
-    .delete()
-    .eq('id', applicationCaseId)
-    .eq('dealer_id', dealerId);
+  const { error } = await supabase.rpc(
+    'delete_application_case_draft',
+    {
+      p_application_case_id: applicationCaseId,
+      p_dealer_id: dealerId,
+    }
+  );
 
   if (error) {
     throw new Error(error.message);

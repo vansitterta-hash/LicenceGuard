@@ -1,4 +1,6 @@
 import { buildApplicationAutofillPackage } from './applicationAutofillService';
+import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
+import { getApplicationCase } from './applicationCaseService';
 import {
   prepareSuggestedApplicationDocuments,
   suggestApplicationDocuments,
@@ -34,6 +36,7 @@ export async function orchestrateApplicationPack(input: {
   clientId: string;
   applicationCaseId: string;
 }): Promise<ApplicationOrchestrationResult> {
+  assertApplicationTypeSupportedInBeta((await getApplicationCase(input.applicationCaseId)).application_type);
   const completedStages: ApplicationOrchestrationStage[] = [];
   let preparedDocumentCount = 0;
   let officialFormArchived = false;

@@ -26,7 +26,20 @@ export function validateDocumentLayout(layout: DocumentLayoutDefinition): Docume
     if (element.page < 1 || element.page > layout.pageCount) issues.push({ elementId: element.id, message: `Page ${element.page} is outside the declared page count.` });
     if (!Number.isFinite(element.x) || !Number.isFinite(element.y)) issues.push({ elementId: element.id, message: 'Coordinates must be finite numbers.' });
     if (element.kind === 'CHECKBOX' && !element.choiceValue) issues.push({ elementId: element.id, message: 'Checkbox elements require a choiceValue.' });
+    if (element.kind === 'BOXED_TEXT') {
+      if (!Number.isInteger(element.boxCount) || (element.boxCount ?? 0) < 1) {
+        issues.push({ elementId: element.id, message: 'Boxed text elements require a positive integer boxCount.' });
+      }
+      if (element.boxWidth === undefined && element.width === undefined) {
+        issues.push({ elementId: element.id, message: 'Boxed text elements require a boxWidth or total width.' });
+      }
+      if ((element.separatorAfter ?? []).some((index) => !Number.isInteger(index) || index < 1 || index >= (element.boxCount ?? 0))) {
+        issues.push({ elementId: element.id, message: 'Boxed text separator positions must fall between configured character boxes.' });
+      }
+    }
     if (element.width !== undefined && element.width <= 0) issues.push({ elementId: element.id, message: 'Width must be greater than zero.' });
+    if (element.boxWidth !== undefined && element.boxWidth <= 0) issues.push({ elementId: element.id, message: 'Box width must be greater than zero.' });
+    if (element.separatorWidth !== undefined && element.separatorWidth < 0) issues.push({ elementId: element.id, message: 'Separator width cannot be negative.' });
     if (element.fontSize !== undefined && element.fontSize <= 0) issues.push({ elementId: element.id, message: 'Font size must be greater than zero.' });
   }
 

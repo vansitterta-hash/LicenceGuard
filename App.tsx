@@ -1,3 +1,4 @@
+import PasswordScreen from './src/screens/PasswordScreen';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -11,7 +12,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import { Colors } from './src/theme/colors';
 
 function RootApplication() {
-  const { loading, session } = useAuth();
+  const { loading, session, recovery, recoveryError, finishRecovery } = useAuth();
 
   if (loading) {
     return (
@@ -24,6 +25,8 @@ function RootApplication() {
       </SafeAreaView>
     );
   }
+
+  if (recovery) return <PasswordScreen recovery error={recoveryError} onDone={finishRecovery} />;
 
   if (!session) {
     return <LoginScreen />;

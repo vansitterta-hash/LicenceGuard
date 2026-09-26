@@ -1,4 +1,7 @@
 import { supabase } from '../lib/supabase';
+import { declarationDataIssues, declarationReadinessIssues, saps271DeclarationFields } from '../utils/saps271Declarations';
+import { getAutofillFormCode } from '../utils/applicationBetaPolicy';
+import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import {
   getApplicationCaseTypeLabel,
   isCompetencyApplicationType,
@@ -20,26 +23,6 @@ import type {
 
 function text(value: string | null | undefined): string {
   return value?.trim() ?? '';
-}
-
-function selectFormCode(type: ApplicationCaseType): AutofillFormCode {
-  switch (type) {
-    case 'COMPETENCY_FIRST_APPLICATION':
-      return 'SAPS_517';
-    case 'COMPETENCY_ADDITIONAL_CATEGORY':
-      return 'SAPS_517_A';
-    case 'COMPETENCY_RENEWAL':
-    case 'COMPETENCY_REAPPLICATION':
-      return 'SAPS_517_G';
-    case 'FIREARM_LICENCE_FIRST_APPLICATION':
-    case 'FIREARM_LICENCE_ADDITIONAL_APPLICATION':
-      return 'SAPS_271';
-    case 'FIREARM_LICENCE_RENEWAL':
-    case 'FIREARM_LICENCE_REAPPLICATION':
-      return 'SAPS_518_A';
-    default:
-      return 'APPLICATION_WORKSHEET';
-  }
 }
 
 function formLabel(code: AutofillFormCode): string {
@@ -156,6 +139,7 @@ export async function buildApplicationAutofillPackage(
 
   if (caseError) throw new Error(caseError.message);
   const applicationCase = caseData as ApplicationCaseRecord;
+  assertApplicationTypeSupportedInBeta(applicationCase.application_type);
 
   const [clientResult, firearmResult, licenceResult, competencyResult] = await Promise.all([
     supabase.from('clients').select('*').eq('id', clientId).single(),
@@ -178,9 +162,20 @@ export async function buildApplicationAutofillPackage(
   const licence = (licenceResult.data ?? null) as FirearmLicenceRecord | null;
   const competency = (competencyResult.data ?? null) as CompetencyRecord | null;
   const issues = validate(client, applicationCase, firearm, licence, competency);
-  const code = selectFormCode(applicationCase.application_type);
+  const code = getAutofillFormCode(applicationCase.application_type);
+  const usesBackgroundQuestionnaire = ['SAPS_271', 'SAPS_517', 'SAPS_517_A'].includes(code);
+  if (code === 'SAPS_271') {
+    for (const [index, message] of declarationReadinessIssues(client.saps271_declarations, applicationCase.created_at).entries()) {
+      issues.push({ key: `saps271Declaration.${index}`, label: 'SAPS 271 Background & Declarations', message, severity: 'BLOCKING' });
+    }
+  } else if (usesBackgroundQuestionnaire) {
+    for (const [index, message] of declarationDataIssues(client.saps271_declarations).entries()) {
+      issues.push({ key: `backgroundQuestionnaire.${index}`, label: 'SAPS Background Questionnaire', message, severity: 'BLOCKING' });
+    }
+  }
 
   return {
+    ...(usesBackgroundQuestionnaire ? { saps271Declarations: client.saps271_declarations ?? null, saps271DeclarationFields: saps271DeclarationFields(client.saps271_declarations) } : {}),
     generatedAt: new Date().toISOString(),
     applicant: {
       fullName: `${client.first_name} ${client.surname}`.trim(),

@@ -24,6 +24,8 @@ export type RequirementDelivery =
   | 'PHYSICAL_SUBMISSION';
 
 export type ReadinessRequirement = {
+  /** Existing source selected for this requirement; no document record is mutated. */
+  documentId?: string;
   key: string;
   label: string;
   detail: string;
@@ -51,6 +53,7 @@ export type ApplicationCaseReadiness = {
   requirements: ReadinessRequirement[];
   missingCount: number;
   warningCount: number;
+  unsupportedMessage?: string;
 };
 
 export type ClientApplicationReadiness = {

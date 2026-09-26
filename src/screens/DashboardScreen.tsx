@@ -1,6 +1,10 @@
+import { userAlert as Alert } from '../utils/userAlert';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { getDashboardCounts } from '../services/dashboardService';
+import PasswordScreen from './PasswordScreen';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -37,22 +41,18 @@ type Props = NativeStackScreenProps<
 const summaryCards = [
   {
     label: 'Clients',
-    value: '0',
     icon: Users,
   },
   {
     label: 'Due within 120 days',
-    value: '0',
     icon: CalendarClock,
   },
   {
     label: 'Open application cases',
-    value: '0',
     icon: FileCheck2,
   },
   {
     label: 'Expired or critical',
-    value: '0',
     icon: TriangleAlert,
   },
 ];
@@ -66,6 +66,17 @@ export default function DashboardScreen({
     signOut,
   } = useAuth();
 
+  const [counts, setCounts] = useState<number[] | null>(null);
+  const [countError, setCountError] = useState<string | null>(null);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    setCounts(null); setCountError(null);
+    if (dealerProfile?.dealerId) void getDashboardCounts(dealerProfile.dealerId).then((result) => {
+      if (active) setCounts(result);
+    }).catch(() => { if (active) setCountError('Unable to load dashboard totals. Reopen the dashboard to retry.'); });
+    return () => { active = false; };
+  }, [dealerProfile?.dealerId]));
+  const [changingPassword, setChangingPassword] = useState(false);
   const { width } = useWindowDimensions();
   const isCompact = width < 720;
 
@@ -93,8 +104,11 @@ export default function DashboardScreen({
     );
   }
 
+  if (changingPassword) return <PasswordScreen onDone={() => setChangingPassword(false)} />;
+
   return (
     <Screen>
+      {countError ? <Text accessibilityRole="alert" style={{ color: Colors.text }}>{countError}</Text> : null}
       <View
         style={[
           styles.header,
@@ -121,6 +135,7 @@ export default function DashboardScreen({
           </View>
         </View>
 
+        <Button title="Change password" size="small" variant="secondary" onPress={() => setChangingPassword(true)} />
         <Button
           leftIcon={
             <LogOut
@@ -183,7 +198,7 @@ export default function DashboardScreen({
       </Text>
 
       <View style={styles.summaryGrid}>
-        {summaryCards.map((summary) => {
+        {summaryCards.map((summary, index) => {
           const Icon = summary.icon;
 
           return (
@@ -206,7 +221,7 @@ export default function DashboardScreen({
               </View>
 
               <Text style={styles.summaryValue}>
-                {summary.value}
+                {counts ? String(counts[index]) : '...'}
               </Text>
 
               <Text style={styles.summaryLabel}>

@@ -1,3 +1,5 @@
+import { finishPendingDraftSaves } from '../utils/draftSaveQueue';
+import { acceptPasswordRecovery, isPasswordRecoveryUrl } from '../services/passwordService';
 import {
   createContext,
   ReactNode,
@@ -21,6 +23,9 @@ type AuthContextValue = {
   user: User | null;
   dealerProfile: DealerProfile | null;
   loading: boolean;
+  recovery: boolean;
+  recoveryError: string | null;
+  finishRecovery: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -46,6 +51,8 @@ type DealerUserRow = {
 };
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const [recovery, setRecovery] = useState(() => typeof window !== 'undefined' && isPasswordRecoveryUrl(window.location.href));
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [dealerProfile, setDealerProfile] =
     useState<DealerProfile | null>(null);
@@ -114,6 +121,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const initialise = async () => {
       try {
+        if (typeof window !== 'undefined' && isPasswordRecoveryUrl(window.location.href)) {
+          try {
+            await acceptPasswordRecovery(window.location.href, window.sessionStorage.getItem('licenceguard-password-recovery') === '1');
+            window.sessionStorage.setItem('licenceguard-password-recovery', '1');
+          } catch (error) {
+            setRecoveryError(error instanceof Error ? error.message : 'This reset link is invalid or has expired.');
+          } finally {
+            window.history.replaceState(null, '', window.location.pathname + '?reset-password=1');
+          }
+        }
         const {
           data: { session: currentSession },
         } = await supabase.auth.getSession();
@@ -143,19 +160,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      setLoading(true);
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
-
-      try {
-        if (nextSession?.user) {
-          await loadDealerProfile(nextSession.user.id);
-        } else {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      if (!nextSession) { setDealerProfile(null); return; }
+      // Leave the Supabase auth callback before making database requests.
+      // Token refresh and USER_UPDATED must not unmount an active application form.
+      if (event === 'SIGNED_IN') setTimeout(() => {
+        if (mounted) void loadDealerProfile(nextSession.user.id).catch((error) => {
+          console.error('Unable to load dealer membership:', error);
           setDealerProfile(null);
-        }
-      } finally {
-        setLoading(false);
-      }
+        });
+      }, 0);
     });
 
     return () => {
@@ -195,6 +211,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const signOut = async () => {
+    await finishPendingDraftSaves();
     setLoading(true);
 
     try {
@@ -211,8 +228,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const finishRecovery = async () => {
+    await signOut();
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('licenceguard-password-recovery');
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setRecovery(false); setRecoveryError(null);
+  };
+
   const value = useMemo<AuthContextValue>(
     () => ({
+      recovery, recoveryError, finishRecovery,
       session,
       user: session?.user ?? null,
       dealerProfile,
@@ -220,7 +247,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       signIn,
       signOut,
     }),
-    [dealerProfile, loading, session]
+    [dealerProfile, loading, session, recovery, recoveryError]
   );
 
   return (

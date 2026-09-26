@@ -1,4 +1,7 @@
 import { supabase } from '../lib/supabase';
+import { declarationReadinessIssues } from '../utils/saps271Declarations';
+import type { Saps271Declarations } from '../types/saps271Declarations';
+import { isApplicationTypeSupportedInBeta, UNSUPPORTED_APPLICATION_TYPE_MESSAGE } from '../utils/unsupportedApplicationTypePolicy';
 import type {
   ApplicationCaseReadiness,
   ApplicationReadinessState,
@@ -6,10 +9,10 @@ import type {
   ReadinessRequirement,
   RequirementState,
 } from '../types/applicationReadiness';
-import type { ApplicationCaseType } from '../types/applicationCase';
+import { isCompetencyApplicationType, type ApplicationCaseType } from '../types/applicationCase';
 import type { CompetencyCategory } from '../types/competency';
 import type { DocumentRecord, DocumentType } from '../types/document';
-import { documentReferencesApplicationCase } from './documentService';
+import { documentReferencesApplicationCase, isReusableClientIdentification } from './documentService';
 
 const db = supabase as any;
 const DAY_MS = 86_400_000;
@@ -20,8 +23,9 @@ const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
   'FIREARM_LICENCE_RENEWAL_FORM',
 ]);
 
-type ClientRow = { first_name: string; surname: string };
+type ClientRow = { first_name: string; surname: string; saps271_declarations?: Saps271Declarations | null };
 type CaseRow = {
+  created_at?: string;
   id: string;
   application_type: ApplicationCaseType;
   status: string;
@@ -160,14 +164,27 @@ function selectRequirementDocument(
   requirement: RequirementDefinition,
   applicationCase: CaseRow,
   firearm: FirearmRow | undefined,
-  licence: LicenceRow | undefined
+  licence: LicenceRow | undefined,
+  sourceCases: CaseRow[]
 ): DocumentRecord | undefined {
   if (!requirement.documentType) return undefined;
   const acceptedTypes = requirement.acceptableDocumentTypes ?? [requirement.documentType];
   return documents
     .filter((document) => {
       if (!acceptedTypes.includes(document.document_type)) return false;
+      if (isReusableClientIdentification(document)) return true;
       if (requirement.evidenceKind && document.metadata?.evidenceKind !== requirement.evidenceKind) return false;
+      if (requirement.documentType === 'MOTIVATION' && isCompetencyApplicationType(applicationCase.application_type)) {
+        // A firearm motivation or a filename match is not competency evidence.
+        if (document.firearm_id || document.firearm_licence_id) return false;
+        if (documentReferencesApplicationCase(document, applicationCase.id)) return true;
+        return Boolean(applicationCase.competency_category) && sourceCases.some((source) =>
+          documentReferencesApplicationCase(document, source.id)
+          && source.application_type === applicationCase.application_type
+          && source.competency_category === applicationCase.competency_category
+          && !source.firearm_id
+        );
+      }
       if (requirement.requiresFirearmMatch) {
         return Boolean(firearm && document.firearm_id === firearm.id)
           && (!document.application_case_id || documentReferencesApplicationCase(document, applicationCase.id));
@@ -204,8 +221,8 @@ function sectionExpectedYears(section: string | null): number | null {
 
 export async function getClientApplicationReadiness(clientId: string): Promise<ClientApplicationReadiness> {
   const [clientResult, casesResult, competenciesResult, firearmsResult, licencesResult, documentsResult] = await Promise.all([
-    db.from('clients').select('first_name,surname').eq('id', clientId).single(),
-    db.from('application_cases').select('*').eq('client_id', clientId).not('status', 'in', '("APPROVED","DECLINED","WITHDRAWN","CLOSED")').order('opened_date', { ascending: false }),
+    db.from('clients').select('first_name,surname,saps271_declarations').eq('id', clientId).single(),
+    db.from('application_cases').select('*').eq('client_id', clientId).order('opened_date', { ascending: false }),
     db.from('competencies').select('id,category,certificate_number,issue_date,verified').eq('client_id', clientId),
     db.from('firearms').select('id,make,model,calibre,serial_number,required_competency').eq('client_id', clientId).eq('is_active', true),
     db.from('firearm_licences').select('id,firearm_id,licence_number,licence_section,issue_date,expiry_date').eq('client_id', clientId),
@@ -215,7 +232,8 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
   if (error) throw new Error(error.message);
 
   const client = clientResult.data as ClientRow;
-  const cases = (casesResult.data ?? []) as CaseRow[];
+  const sourceCases = (casesResult.data ?? []) as CaseRow[];
+  const cases = sourceCases.filter((item) => !['APPROVED', 'DECLINED', 'WITHDRAWN', 'CLOSED'].includes(item.status));
   const competencies = (competenciesResult.data ?? []) as CompetencyRow[];
   const firearms = (firearmsResult.data ?? []) as FirearmRow[];
   const licences = (licencesResult.data ?? []) as LicenceRow[];
@@ -228,6 +246,9 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const firearm = applicationCase.firearm_id ? firearmById.get(applicationCase.firearm_id) : undefined;
     const licence = applicationCase.firearm_licence_id ? licenceById.get(applicationCase.firearm_licence_id) : undefined;
     const category = applicationCase.competency_category ?? firearm?.required_competency ?? null;
+    if (!isApplicationTypeSupportedInBeta(applicationCase.application_type)) {
+      return { caseId: applicationCase.id, applicationType: applicationCase.application_type, subject: 'Unsupported application', status: applicationCase.status, competencyCategory: category, firearmId: applicationCase.firearm_id, firearmLicenceId: applicationCase.firearm_licence_id, licenceSection: applicationCase.licence_section ?? licence?.licence_section ?? null, score: 0, state: 'BLOCKED' as const, readyToGenerate: false, requirements: [], missingCount: 0, warningCount: 0, unsupportedMessage: UNSUPPORTED_APPLICATION_TYPE_MESSAGE };
+    }
     const matchingCompetency = category ? competencies.find((item) => item.category === category) : undefined;
     const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
     const definitions: RequirementDefinition[] = [...baseDefinitions];
@@ -270,6 +291,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
 
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;
+      let documentId: string | undefined;
       if (definition.key === 'ACQUISITION_DETAILS') {
         const complete = applicationCase.acquisition_source === 'DEALER'
           ? Boolean(applicationCase.supplier_name?.trim())
@@ -285,8 +307,10 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
           definition,
           applicationCase,
           firearm,
-          licence
+          licence,
+          sourceCases
         );
+        documentId = linked?.id;
         state = definition.delivery === 'PHYSICAL_SUBMISSION'
           ? 'PHYSICAL_REQUIRED'
           : !linked && definition.manualWhenMissing
@@ -297,6 +321,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       }
       return {
         ...definition,
+        documentId,
         state,
         delivery: state === 'MANUAL_REQUIRED'
           ? 'MANUAL_PACK' as const
@@ -322,6 +347,10 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       }
     }
 
+    if (['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.application_type)) {
+      const declarationIssues = declarationReadinessIssues(client.saps271_declarations, applicationCase.created_at);
+      requirements.push({ key: 'SAPS271_DECLARATIONS', label: 'SAPS 271 Background & Declarations', detail: declarationIssues.join(' ') || 'Declarations answered and confirmed after this application was created.', documentType: null, required: true, delivery: 'DIGITAL', state: declarationIssues.length ? 'MISSING' : 'SATISFIED' });
+    }
     const state = stateFor(requirements);
     const required = requirements.filter((item) => item.required && item.delivery === 'DIGITAL');
     const satisfied = required.filter((item) => item.state === 'SATISFIED').length;

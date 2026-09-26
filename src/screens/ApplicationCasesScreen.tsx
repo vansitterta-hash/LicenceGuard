@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useMemo,
@@ -157,13 +157,51 @@ export default function ApplicationCasesScreen({
       return;
     }
 
+    const message = `Delete the ${getApplicationCaseTypeLabel(
+      applicationCase.application_type
+    )} case for ${
+      applicationCase.subjectDescription
+    }? This action cannot be undone.`;
+
+    const performDelete = async () => {
+      setDeletingId(applicationCase.id);
+
+      try {
+        await deleteApplicationCase(
+          applicationCase.id,
+          dealerProfile.dealerId
+        );
+
+        await loadData();
+      } catch (error) {
+        Alert.alert(
+          'Unable to delete application case',
+          error instanceof Error
+            ? error.message
+            : 'An unknown error occurred.'
+        );
+      } finally {
+        setDeletingId(null);
+      }
+    };
+
+    const browserConfirm = (
+      globalThis as typeof globalThis & {
+        confirm?: (message?: string) => boolean;
+      }
+    ).confirm;
+
+    if (browserConfirm) {
+      if (browserConfirm(message)) {
+        void performDelete();
+      }
+
+      return;
+    }
+
     Alert.alert(
       'Delete application case',
-      `Delete the ${getApplicationCaseTypeLabel(
-        applicationCase.application_type
-      )} case for ${
-        applicationCase.subjectDescription
-      }? This action cannot be undone.`,
+      message,
       [
         {
           text: 'Cancel',
@@ -172,26 +210,8 @@ export default function ApplicationCasesScreen({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            setDeletingId(applicationCase.id);
-
-            try {
-              await deleteApplicationCase(
-                applicationCase.id,
-                dealerProfile.dealerId
-              );
-
-              await loadData();
-            } catch (error) {
-              Alert.alert(
-                'Unable to delete application case',
-                error instanceof Error
-                  ? error.message
-                  : 'An unknown error occurred.'
-              );
-            } finally {
-              setDeletingId(null);
-            }
+          onPress: () => {
+            void performDelete();
           },
         },
       ]

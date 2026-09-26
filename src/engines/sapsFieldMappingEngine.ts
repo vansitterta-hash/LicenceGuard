@@ -1,4 +1,5 @@
 import { getSapsTemplate } from '../data/sapsTemplateRegistry';
+import { saps271DeclarationFields } from '../utils/saps271Declarations';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import type { SapsMappedDocument, SapsTemplateFieldKey } from '../types/sapsTemplate';
 import type { ApplicationReviewValues } from '../services/generatedApplicationDocumentService';
@@ -8,6 +9,7 @@ function sectionFlag(section: string, expected: string): string {
 }
 
 function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, values: ApplicationReviewValues): string {
+  if (key.startsWith('applicant.declarations.')) return saps271DeclarationFields(data.saps271Declarations)[key] ?? '';
   const section = values.licenceSection;
   switch (key) {
     case 'application.section12': return sectionFlag(section, '12');
@@ -54,6 +56,7 @@ function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, v
     case 'application.reference': return values.applicationReference;
     case 'application.motivationSummary': return values.motivationSummary;
   }
+  return '';
 }
 
 export function mapApplicationToSapsTemplate(data: ApplicationAutofillPackage, values: ApplicationReviewValues): SapsMappedDocument {

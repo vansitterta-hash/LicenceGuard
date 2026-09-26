@@ -1,6 +1,8 @@
 import type { DocumentFieldDefinition, DocumentFieldId } from '../types/documentEngine';
+import { SAPS271_DECLARATION_FIELDS } from './saps271DeclarationMapping';
 
 const FIELDS: DocumentFieldDefinition[] = [
+  ...SAPS271_DECLARATION_FIELDS,
   { id: 'application.type', label: 'Application type', dataType: 'CHOICE', sourcePath: 'data.application.applicationType', normalise: 'TRIM' },
   { id: 'application.section', label: 'Licence section', dataType: 'TEXT', sourcePath: 'review.licenceSection', normalise: 'SECTION_NUMBER' },
   { id: 'application.policeStation', label: 'Police station / DFO', dataType: 'TEXT', sourcePath: 'review.policeStation', normalise: 'TRIM' },

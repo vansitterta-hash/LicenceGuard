@@ -1,7 +1,7 @@
+import { userAlert as Alert } from '../utils/userAlert';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -31,6 +31,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import Saps271DeclarationsSection from '../components/client/Saps271DeclarationsSection';
 import ProactiveRenewalPreviewPanel from '../components/client/ProactiveRenewalPreviewPanel';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
@@ -325,7 +326,7 @@ export default function ClientProfileScreen({
       </Card>
 
       <Card
-        subtitle="Continue saved work without creating the application again."
+        subtitle="Continue saved work below. Starting a competency application resumes its oldest working draft."
         title="Applications in progress"
       >
         {openApplications.length === 0 ? (
@@ -336,16 +337,27 @@ export default function ClientProfileScreen({
           </View>
         ) : (
           <View style={styles.applicationList}>
-            {openApplications.map((applicationCase) => (
+            {openApplications.map((applicationCase, applicationIndex) => (
               <Pressable
                 key={applicationCase.id}
-                onPress={() => navigation.navigate('ApplicationReadiness', { clientId: client.id, applicationCaseId: applicationCase.id })}
+                onPress={() =>
+                  applicationCase.status === 'NOT_STARTED'
+                    ? navigation.navigate('ApplicationCaseForm', {
+                        clientId: client.id,
+                        applicationCaseId: applicationCase.id,
+                      })
+                    : navigation.navigate('ApplicationReadiness', {
+                        clientId: client.id,
+                        applicationCaseId: applicationCase.id,
+                      })
+                }
                 style={({ pressed }) => [styles.applicationRow, pressed ? styles.applicationRowPressed : null]}
               >
                 <View style={styles.applicationRowMain}>
                   <Text style={styles.applicationRowTitle}>{getApplicationCaseTypeLabel(applicationCase.application_type)}</Text>
                   <Text style={styles.applicationRowSubject}>{applicationCase.subjectDescription}</Text>
-                  <Text style={styles.applicationRowStatus}>{getApplicationCaseStatusLabel(applicationCase.status)} · {applicationCase.progress_percent}% complete</Text>
+                  <Text style={styles.applicationRowStatus}>Saved application {applicationIndex + 1} - opened {applicationCase.opened_date}</Text>
+                  <Text style={styles.applicationRowStatus}>{getApplicationCaseStatusLabel(applicationCase.status)} Ã‚Â· {applicationCase.progress_percent}% complete</Text>
                 </View>
                 <View style={styles.applicationContinue}>
                   <Text style={styles.applicationContinueText}>Continue</Text>
@@ -659,7 +671,7 @@ export default function ClientProfileScreen({
                     Expires: {formatDate(
                       licence.expiryDate
                     )}{' '}
-                    · {formatDaysUntilExpiry(
+                    Ã‚Â· {formatDaysUntilExpiry(
                       licence.daysUntilExpiry
                     )}
                   </Text>
@@ -683,6 +695,7 @@ export default function ClientProfileScreen({
         )}
       </Card>
 
+      <Saps271DeclarationsSection value={client.saps271_declarations} />
       {client.notes ? (
         <Card title="Dealer or consultant notes">
           <Text style={styles.notesText}>

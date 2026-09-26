@@ -1,8 +1,9 @@
 import type { AutofillFormCode } from './applicationAutofill';
 import type { DocumentFieldId } from './documentEngine';
 
-export type DocumentLayoutElementKind = 'TEXT' | 'CHECKBOX';
+export type DocumentLayoutElementKind = 'TEXT' | 'BOXED_TEXT' | 'CHECKBOX';
 export type DocumentLayoutTextAlign = 'LEFT' | 'CENTER' | 'RIGHT';
+export type DocumentLayoutAutofillPolicy = 'APPLICANT' | 'ROUTING' | 'PROTECTED_OFFICIAL';
 
 export type DocumentLayoutElement = {
   id: string;
@@ -18,6 +19,12 @@ export type DocumentLayoutElement = {
   maxLines?: number;
   align?: DocumentLayoutTextAlign;
   uppercase?: boolean;
+  autofillPolicy?: DocumentLayoutAutofillPolicy;
+  boxCount?: number;
+  boxWidth?: number;
+  separatorAfter?: number[];
+  separatorWidth?: number;
+  characterSet?: 'DIGITS' | 'ALPHANUMERIC';
   choiceValue?: string;
   mark?: string;
   conditionFieldId?: DocumentFieldId;

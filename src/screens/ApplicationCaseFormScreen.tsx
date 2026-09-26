@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { userAlert as Alert } from '../utils/userAlert';
+﻿import { usePreventRemove } from '@react-navigation/native';
+import { isApplicationTypeSupportedInBeta, UNSUPPORTED_APPLICATION_TYPE_MESSAGE } from '../utils/unsupportedApplicationTypePolicy';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -28,6 +30,8 @@ import { useAuth } from '../context/AuthContext';
 import { listClientCompetencies } from '../engines/competencyEngine';
 import {
   createApplicationCase,
+  findWorkingCompetencyDraft,
+  createOrResumeFirearmApplicationDraft,
   getApplicationCase,
   updateApplicationCase,
 } from '../services/applicationCaseService';
@@ -144,6 +148,16 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   const [values, setValues] = useState<ApplicationCaseFormValues>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const hydratedRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const initialisedRouteKeyRef = useRef<string | null>(null);
+  const lastPersistedValuesRef = useRef<string | null>(null);
+  const latestValuesRef = useRef<ApplicationCaseFormValues>(EMPTY_FORM);
+  latestValuesRef.current = values;
 
   const isEditing = Boolean(route.params.applicationCaseId);
   const workflowConfig = route.params.workflowAction
@@ -154,18 +168,26 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   const newFirearmApplication = isNewFirearmLicenceApplication(values.applicationType);
 
   const loadData = useCallback(async () => {
+    const sequence = ++loadSequenceRef.current;
     setLoading(true);
+    setLoadError(null);
+    const routeKey = `${route.params.clientId}:${route.params.applicationCaseId ?? route.params.workflowAction ?? 'new'}`;
+    const shouldInitialiseForm = initialisedRouteKeyRef.current !== routeKey;
+    if (shouldInitialiseForm) hydratedRef.current = false;
     try {
       const [client, competencies, firearms] = await Promise.all([
         getClient(route.params.clientId),
         listClientCompetencies(route.params.clientId),
         listClientFirearms(route.params.clientId),
       ]);
+      if (sequence !== loadSequenceRef.current) return;
       setData({ client, competencies, firearms });
 
-      if (route.params.applicationCaseId) {
+      if (route.params.applicationCaseId && shouldInitialiseForm) {
         const item = await getApplicationCase(route.params.applicationCaseId);
-        setValues({
+        if (sequence !== loadSequenceRef.current) return;
+        if (item.client_id !== route.params.clientId || item.dealer_id !== dealerProfile?.dealerId) throw new Error('This application is not available for the selected client.');
+        const hydrated: ApplicationCaseFormValues = {
           applicationType: item.application_type,
           status: item.status,
           competencyCategory: item.competency_category ?? 'HANDGUN',
@@ -190,8 +212,20 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
           progressPercent: String(item.progress_percent),
           dealerNotes: item.dealer_notes ?? '',
           clientNotes: item.client_notes ?? '',
-        });
-      } else if (workflowConfig) {
+        };
+        latestValuesRef.current = hydrated;
+        lastPersistedValuesRef.current = JSON.stringify(hydrated);
+        setValues(hydrated);
+        setDirty(false);
+      } else if (workflowConfig && shouldInitialiseForm) {
+        if (isCompetencyApplicationType(workflowConfig.applicationType) && dealerProfile?.dealerId) {
+          const existing = await findWorkingCompetencyDraft(dealerProfile.dealerId, route.params.clientId, workflowConfig.applicationType);
+          if (sequence !== loadSequenceRef.current) return;
+          if (existing) {
+            navigation.setParams({ applicationCaseId: existing.id });
+            return;
+          }
+        }
         const applicationType = route.params.workflowAction === 'NEW_FIREARM_APPLICATION'
           ? firearms.some((item) => Boolean(item.licence))
             ? 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'
@@ -207,12 +241,16 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
               : 'EXISTING_FIREARM',
         });
       }
+      if (shouldInitialiseForm) {
+        initialisedRouteKeyRef.current = routeKey;
+        hydratedRef.current = true;
+      }
     } catch (error) {
-      Alert.alert('Unable to prepare application', error instanceof Error ? error.message : 'An unknown error occurred.');
+      if (sequence === loadSequenceRef.current) setLoadError(error instanceof Error ? error.message : 'Unable to load this application.');
     } finally {
-      setLoading(false);
+      if (sequence === loadSequenceRef.current) setLoading(false);
     }
-  }, [route.params.applicationCaseId, route.params.clientId, route.params.workflowAction, workflowConfig]);
+  }, [route.params.applicationCaseId, route.params.clientId, route.params.workflowAction, workflowConfig, dealerProfile?.dealerId, navigation]);
 
   useEffect(() => {
     void loadData();
@@ -237,16 +275,39 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     setValues((current) => ({ ...current, [key]: value }));
   };
 
-  const selectFirearm = (firearm: FirearmListItem) => {
-    setValues((current) => ({
-      ...current,
+  const selectFirearm = async (firearm: FirearmListItem) => {
+    if (creatingDraft) return;
+
+    const nextValues = {
+      ...values,
       firearmId: firearm.id,
       firearmLicenceId: firearm.licence?.id ?? '',
-      licenceSection: current.applicationType === 'FIREARM_LICENCE_RENEWAL'
-        ? firearm.licence?.licence_section ?? current.licenceSection
-        : current.licenceSection,
+      licenceSection: values.applicationType === 'FIREARM_LICENCE_RENEWAL'
+        ? firearm.licence?.licence_section ?? values.licenceSection
+        : values.licenceSection,
       competencyCategory: firearm.required_competency,
-    }));
+    };
+    setValues(nextValues);
+
+    if (route.params.applicationCaseId || !dealerProfile?.dealerId || !user?.id || !isFirearmApplicationType(nextValues.applicationType)) {
+      return;
+    }
+
+    setCreatingDraft(true);
+    try {
+      const draft = await createOrResumeFirearmApplicationDraft(
+        dealerProfile.dealerId,
+        route.params.clientId,
+        user.id,
+        nextValues
+      );
+      lastPersistedValuesRef.current = JSON.stringify(nextValues);
+      navigation.setParams({ applicationCaseId: draft.id });
+    } catch (error) {
+      Alert.alert('Unable to start application draft', error instanceof Error ? error.message : 'An unknown error occurred.');
+    } finally {
+      setCreatingDraft(false);
+    }
   };
 
   const selectCompetency = (competency: CompetencyListItem) => {
@@ -257,8 +318,62 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     }));
   };
 
+  const persistLatest = useCallback(async () => {
+    const id = route.params.applicationCaseId;
+    if (!id || !hydratedRef.current || !dealerProfile?.dealerId || !user?.id) return;
+    const snapshot = latestValuesRef.current;
+    if (['SUBMITTED', 'APPROVED', 'DECLINED', 'WITHDRAWN', 'CLOSED'].includes(snapshot.status)) return;
+    if (!isApplicationTypeSupportedInBeta(snapshot.applicationType)) return;
+    const serialised = JSON.stringify(snapshot);
+    if (serialised === lastPersistedValuesRef.current) return;
+    setDirty(true);
+    try {
+      await updateApplicationCase(id, dealerProfile.dealerId, route.params.clientId, user.id, snapshot);
+      lastPersistedValuesRef.current = serialised;
+      setSaveError(null);
+      if (JSON.stringify(latestValuesRef.current) === serialised) setDirty(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Unable to save changes. Please retry.');
+      throw error;
+    }
+  }, [dealerProfile?.dealerId, route.params.applicationCaseId, route.params.clientId, user?.id]);
+
+  useEffect(() => {
+    if (!loading) void persistLatest().catch(() => undefined);
+  }, [loading, values, persistLatest]);
+
+  // A pop/replace must finish saving before removing this screen. Child screens
+  // keep the mounted form, while already queued writes survive unmount.
+  usePreventRemove(dirty, ({ data: actionData }) => {
+    void persistLatest().then(() => navigation.dispatch(actionData.action)).catch(() => undefined);
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const startDraft = async () => {
+    if (creatingDraft || route.params.applicationCaseId || !hydratedRef.current || !dealerProfile?.dealerId || !user?.id || !canContinue) return;
+    setCreatingDraft(true);
+    try {
+      const draft = await createApplicationCase(dealerProfile.dealerId, route.params.clientId, user.id, latestValuesRef.current);
+      navigation.setParams({ applicationCaseId: draft.id });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Unable to start application.');
+    } finally { setCreatingDraft(false); }
+  };
+
+  useEffect(() => {
+    if (!loading && competencyApplication && canContinue && !route.params.applicationCaseId) void startDraft();
+  }, [loading, competencyApplication, canContinue, route.params.applicationCaseId]);
+
   const save = async () => {
-    if (!dealerProfile?.dealerId || !user?.id || !data) return;
+    if (saving || creatingDraft || !hydratedRef.current || !dealerProfile?.dealerId || !user?.id || !data) return;
     if (!canContinue) {
       Alert.alert('One detail is still needed', competencyApplication
         ? 'Choose a competency category.'
@@ -272,6 +387,10 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         ? await updateApplicationCase(route.params.applicationCaseId, dealerProfile.dealerId, route.params.clientId, user.id, values)
         : await createApplicationCase(dealerProfile.dealerId, route.params.clientId, user.id, values);
 
+      lastPersistedValuesRef.current = JSON.stringify(values);
+      setDirty(false);
+      setSaveError(null);
+      navigation.setParams({ applicationCaseId: saved.id });
       navigation.replace('ApplicationReadiness', {
         clientId: route.params.clientId,
         applicationCaseId: saved.id,
@@ -283,22 +402,29 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     }
   };
 
-  if (loading || !data) {
+  if (loadError) return <Screen><Card title="Unable to load application"><Text style={styles.muted}>{loadError}</Text><Button title="Retry" onPress={() => void loadData()} /></Card></Screen>;
+
+  if (loading || creatingDraft || saving || !data) {
     return (
       <Screen scroll={false}>
         <View style={styles.loading}>
           <ActivityIndicator color={Colors.primary} size="large" />
-          <Text style={styles.muted}>Preparing the client application...</Text>
+          <Text style={styles.muted}>{saving ? 'Saving application...' : 'Preparing the client application...'}</Text>
         </View>
       </Screen>
     );
   }
+
+  if (!isApplicationTypeSupportedInBeta(values.applicationType)) return <Screen><Text style={styles.muted}>{UNSUPPORTED_APPLICATION_TYPE_MESSAGE}</Text></Screen>;
+  if (['SUBMITTED', 'APPROVED', 'DECLINED', 'WITHDRAWN', 'CLOSED'].includes(values.status)) return <Screen><Card title="Application protected"><Text style={styles.muted}>This application can no longer be edited.</Text><Button title="View application" onPress={() => navigation.replace('ApplicationReadiness', { clientId: route.params.clientId, applicationCaseId: route.params.applicationCaseId })} /></Card></Screen>;
 
   const title = workflowConfig?.title ?? getApplicationCaseTypeLabel(values.applicationType);
   const subtitle = workflowConfig?.subtitle ?? 'Update only the details that changed. LicenceGuard will reuse everything else.';
 
   return (
     <Screen maxWidth={960}>
+      {saveError ? <Card title="Changes have not been saved"><Text style={styles.muted}>{saveError}</Text><Button title="Retry save" onPress={() => route.params.applicationCaseId ? void persistLatest().catch(() => undefined) : void startDraft()} /></Card> : null}
+      <Text style={styles.muted}>{creatingDraft ? 'Starting application...' : dirty ? 'Saving changes...' : route.params.applicationCaseId ? 'Changes saved' : 'Choose the application details to start'}</Text>
       <View style={styles.header}>
         <Text style={styles.eyebrow}>APPLICATION ASSISTANT</Text>
         <Text style={styles.title}>{title}</Text>
@@ -325,8 +451,8 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
                 <Pressable key={firearm.id} onPress={() => selectFirearm(firearm)} style={({ pressed }) => [styles.option, selected ? styles.optionSelected : null, pressed ? styles.pressed : null]}>
                   <View style={styles.optionIcon}><Target color={selected ? Colors.primaryLight : Colors.silverDark} size={20} /></View>
                   <View style={styles.optionText}>
-                    <Text style={styles.optionTitle}>{[firearm.make, firearm.model, firearm.calibre].filter(Boolean).join(' · ')}</Text>
-                    <Text style={styles.optionDetail}>Serial {firearm.serial_number}{firearm.licence?.licence_number ? ` · Licence ${firearm.licence.licence_number}` : ''}</Text>
+                    <Text style={styles.optionTitle}>{[firearm.make, firearm.model, firearm.calibre].filter(Boolean).join(' Â· ')}</Text>
+                    <Text style={styles.optionDetail}>Serial {firearm.serial_number}{firearm.licence?.licence_number ? ` Â· Licence ${firearm.licence.licence_number}` : ''}</Text>
                   </View>
                   {selected ? <CheckCircle2 color={Colors.success} size={21} /> : null}
                 </Pressable>
@@ -351,7 +477,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
                     <View style={styles.optionIcon}><ShieldCheck color={selected ? Colors.primaryLight : Colors.silverDark} size={20} /></View>
                     <View style={styles.optionText}>
                       <Text style={styles.optionTitle}>{COMPETENCY_CATEGORIES.find((item) => item.value === competency.category)?.label ?? competency.category}</Text>
-                      <Text style={styles.optionDetail}>{competency.certificate_number ? `Certificate ${competency.certificate_number}` : 'Certificate number not recorded'}{competency.issue_date ? ` · Issued ${competency.issue_date}` : ''}</Text>
+                      <Text style={styles.optionDetail}>{competency.certificate_number ? `Certificate ${competency.certificate_number}` : 'Certificate number not recorded'}{competency.issue_date ? ` Â· Issued ${competency.issue_date}` : ''}</Text>
                     </View>
                     {selected ? <CheckCircle2 color={Colors.success} size={21} /> : null}
                   </Pressable>
@@ -436,7 +562,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         size="large"
         fullWidth
         loading={saving}
-        disabled={!canContinue}
+        disabled={!canContinue || creatingDraft}
         leftIcon={<Save color={Colors.white} size={19} />}
         onPress={() => void save()}
       />

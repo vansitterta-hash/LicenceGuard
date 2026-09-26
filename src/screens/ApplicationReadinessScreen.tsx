@@ -1,7 +1,7 @@
+import { userAlert as Alert } from '../utils/userAlert';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -50,6 +50,7 @@ import {
 import {
   createDocumentSignedUrl,
   documentReferencesApplicationCase,
+  isReusableClientIdentification,
   linkReusableClientDocumentsToApplicationCase,
   listClientDocuments,
 } from '../services/documentService';
@@ -61,7 +62,7 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ReadinessRequirement } from '../types/applicationReadiness';
 import { getDocumentTypeLabel, type DocumentRecord } from '../types/document';
-import { getApplicationCaseTypeLabel } from '../types/applicationCase';
+import { getApplicationCaseTypeLabel, isFirearmApplicationType } from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
 import { PHYSICAL_PASSPORT_PHOTO_REMINDER } from '../constants/submission';
 import { openExternalDocument } from '../utils/openExternalDocument';
@@ -121,9 +122,9 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
   const applicationCase = useMemo(() => {
     if (!data) return null;
-    return data.cases.find((item) => item.caseId === route.params.applicationCaseId)
-      ?? data.cases[0]
-      ?? null;
+    return route.params.applicationCaseId
+      ? data.cases.find((item) => item.caseId === route.params.applicationCaseId) ?? null
+      : data.cases[0] ?? null;
   }, [data, route.params.applicationCaseId]);
 
   const applicationDocuments = useMemo(() => {
@@ -134,6 +135,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         document.lifecycle_status === 'ACTIVE' &&
         (document.application_case_id === applicationCase.caseId ||
           documentReferencesApplicationCase(document, applicationCase.caseId) ||
+          isReusableClientIdentification(document) ||
           document.document_scope === 'CLIENT')
     );
   }, [applicationCase, documents]);
@@ -146,6 +148,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const findRequirementDocument = useCallback(
     (requirement: ReadinessRequirement) => {
       if (!applicationCase || !requirement.documentType) return undefined;
+
+      if (requirement.documentId) {
+        return documents.find((document) => document.id === requirement.documentId);
+      }
 
       const acceptedTypes = requirement.acceptableDocumentTypes ?? [requirement.documentType];
       const candidates = applicationDocuments.filter((document) => {
@@ -163,7 +169,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         ) ?? candidates[0]
       );
     },
-    [applicationCase, applicationDocuments]
+    [applicationCase, applicationDocuments, documents]
   );
 
   const loadSuggestions = useCallback(async () => {
@@ -326,6 +332,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     );
   }
 
+  if (applicationCase.unsupportedMessage) {
+    return <Screen maxWidth={820}><Card style={styles.emptyCard}><Text style={styles.muted}>{applicationCase.unsupportedMessage}</Text></Card></Screen>;
+  }
+
   const outstanding = applicationCase.requirements.filter(
     (item) => item.required && item.delivery === 'DIGITAL' && item.state !== 'SATISFIED' && item.state !== 'NOT_APPLICABLE'
   );
@@ -444,7 +454,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     (requirement) => requirement.state !== 'SATISFIED'
   );
 
-  const workflowSteps: WorkflowStep[] = [
+  const allWorkflowSteps: WorkflowStep[] = [
     {
       key: 'client',
       number: 1,
@@ -570,6 +580,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         : () => void compileApplicationPack(),
     },
   ];
+
+  const workflowSteps = allWorkflowSteps
+    .filter((step) => step.key !== 'firearm' || isFirearmApplicationType(applicationCase.applicationType))
+    .map((step, index) => ({ ...step, number: index + 1 }));
 
   return (
     <Screen maxWidth={920}>

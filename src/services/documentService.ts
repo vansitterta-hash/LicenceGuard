@@ -62,6 +62,13 @@ export function documentReferencesApplicationCase(
     || metadataCaseIds(document.metadata ?? {}).includes(applicationCaseId);
 }
 
+/** Client-owned identity evidence remains reusable across application cases. */
+export function isReusableClientIdentification(document: DocumentRecord): boolean {
+  return document.document_type === 'ID_COPY'
+    && document.lifecycle_status === 'ACTIVE'
+    && (!document.expiry_date || calculateDaysUntil(document.expiry_date) >= 0);
+}
+
 export async function linkReusableClientDocumentsToApplicationCase(input: {
   applicationCaseId: string;
   userId: string;

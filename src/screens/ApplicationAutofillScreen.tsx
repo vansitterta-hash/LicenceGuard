@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
+import { userAlert as Alert } from '../utils/userAlert';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Archive, CheckCircle2, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
 
@@ -38,7 +39,13 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [generatedPdf, setGeneratedPdf] = useState<{ bytes: Uint8Array; url: string; fileName: string } | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
+
+  useEffect(() => () => {
+    if (generatedPdf) URL.revokeObjectURL(generatedPdf.url);
+  }, [generatedPdf]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,13 +82,28 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   };
 
   const generatePdf = async () => {
-    if (!data || !values) return;
+    if (!data || !values || !canFinalise || generatingPdf) return;
+    // Reserve the viewer during the user gesture, before asynchronous rendering.
+    const preview = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    if (preview) {
+      preview.opener = null;
+      preview.document.title = 'Generating official PDF...';
+    }
     setGeneratingPdf(true);
+    setPdfError(null);
+    setGeneratedPdf(null);
     try {
       const bytes = await generateOfficialApplicationPdf(data, values);
-      downloadPdf(bytes, `${data.application.formCode}_${values.surname || 'application'}.pdf`);
+      const fileName = `${data.application.formCode}_${values.surname || 'application'}.pdf`;
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
+      setGeneratedPdf({ bytes, url, fileName });
+      if (preview && !preview.closed) preview.location.href = url;
+      downloadPdf(bytes, fileName);
     } catch (error) {
-      Alert.alert('Unable to generate official PDF', error instanceof Error ? error.message : 'An unknown error occurred.');
+      if (preview && !preview.closed) preview.close();
+      const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+      setPdfError(message);
+      Alert.alert('Unable to generate official PDF', message);
     } finally {
       setGeneratingPdf(false);
     }
@@ -163,6 +185,15 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
       </Card>
 
       {data.issues.length > 0 ? <Card subtitle="Blocking items must be corrected in the source record. Warnings should be checked before finalisation." title="Validation results"><View style={styles.issueList}>{data.issues.map((issue) => <View key={issue.key} style={[styles.issue, { borderColor: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }]}><TriangleAlert color={issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning} size={18} /><View style={styles.issueText}><Text style={styles.issueLabel}>{issue.label}</Text><Text style={styles.muted}>{issue.message}</Text></View><Text style={{ color: issue.severity === 'BLOCKING' ? Colors.danger : Colors.warning }}>{issue.severity}</Text></View>)}</View><Button onPress={() => navigation.navigate('ApplicationCaseForm', { clientId: route.params.clientId, applicationCaseId: route.params.applicationCaseId })} style={styles.editButton} title="Edit source application data" /></Card> : null}
+
+      {pdfError ? <Card title="Official PDF could not be delivered"><Text accessibilityRole="alert" style={{ color: Colors.danger }}>{pdfError}</Text></Card> : null}
+      {generatedPdf ? <Card title="Official PDF ready" subtitle={generatedPdf.fileName}>
+        <Text style={styles.muted}>Your PDF is ready to view or download. It has not been archived.</Text>
+        <View style={styles.actions}>
+          <Button title="Open generated PDF" onPress={() => void Linking.openURL(generatedPdf.url)} />
+          <Button title="Download generated PDF" variant="secondary" onPress={() => downloadPdf(generatedPdf.bytes, generatedPdf.fileName)} />
+        </View>
+      </Card> : null}
 
       <EditSection title="Application" fields={[
         ['Police station / DFO', 'policeStation'], ['Application reference', 'applicationReference'], ['Motivation summary', 'motivationSummary', true],

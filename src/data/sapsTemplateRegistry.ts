@@ -1,8 +1,16 @@
 import type { AutofillFormCode } from '../types/applicationAutofill';
 import type { ApplicationCaseType } from '../types/applicationCase';
+import { getAutofillFormCode } from '../utils/applicationBetaPolicy';
+import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import type { SapsTemplateDefinition } from '../types/sapsTemplate';
+import {
+  SAPS271_DECLARATION_TEMPLATE_FIELDS,
+  SAPS517A_DECLARATION_TEMPLATE_FIELDS,
+  SAPS517_DECLARATION_TEMPLATE_FIELDS,
+} from './saps271DeclarationMapping';
 
 const SAPS_271_FIELDS: SapsTemplateDefinition['fields'] = [
+  ...SAPS271_DECLARATION_TEMPLATE_FIELDS,
   { key: 'application.section12', label: 'Section 12', section: 'Licence category', required: false },
   { key: 'application.section13', label: 'Section 13 - Self-defence', section: 'Licence category', required: false },
   { key: 'application.section14', label: 'Section 14 - Restricted self-defence', section: 'Licence category', required: false },
@@ -41,6 +49,7 @@ const SAPS_271_FIELDS: SapsTemplateDefinition['fields'] = [
 ];
 
 const SAPS_517_FIELDS: SapsTemplateDefinition['fields'] = [
+  ...SAPS517_DECLARATION_TEMPLATE_FIELDS,
   { key: 'application.type', label: 'Application for competency to possess a firearm', section: 'Type of competency certificate', required: true },
   { key: 'competency.category', label: 'Selected competency category', section: 'Type of competency certificate', required: true },
   { key: 'applicant.idNumber', label: 'Identity number', section: 'Applicant particulars', required: true },
@@ -60,6 +69,7 @@ const SAPS_517_FIELDS: SapsTemplateDefinition['fields'] = [
 ];
 
 const SAPS_517_A_FIELDS: SapsTemplateDefinition['fields'] = [
+  ...SAPS517A_DECLARATION_TEMPLATE_FIELDS,
   { key: 'application.type', label: 'Application for a further competency certificate', section: 'Type of competency certificate', required: true },
   { key: 'competency.category', label: 'Selected competency category', section: 'Type of competency certificate', required: true },
   { key: 'applicant.idNumber', label: 'Identity number', section: 'Applicant particulars', required: true },
@@ -140,7 +150,7 @@ const REGISTRY: Record<AutofillFormCode, SapsTemplateDefinition> = {
   },
   SAPS_517: {
     code: 'SAPS_517', name: 'SAPS 517 - Application for a Competency Certificate',
-    applicationTypes: ['COMPETENCY_FIRST_APPLICATION'], documentType: 'COMPETENCY_APPLICATION',
+    applicationTypes: ['COMPETENCY_FIRST_APPLICATION', 'COMPETENCY_REAPPLICATION'], documentType: 'COMPETENCY_APPLICATION',
     sourceAuthority: 'South African Police Service', sourceUrl: '/saps-templates/SAPS_517_EN_OFFICIAL.pdf', instructionsUrl: 'https://www.saps.gov.za/services/flash/firearms/forms/english/ei517.pdf',
     versionLabel: 'Pinned official SAPS English template (SHA-256 8066FF257C854C7D8C641369C0D4BE976B596516BF744FD98701BA67BFF8F378)', fields: SAPS_517_FIELDS,
   },
@@ -152,7 +162,7 @@ const REGISTRY: Record<AutofillFormCode, SapsTemplateDefinition> = {
   },
   SAPS_517_G: {
     code: 'SAPS_517_G', name: 'SAPS 517(g) - Application for Renewal of a Competency Certificate',
-    applicationTypes: ['COMPETENCY_RENEWAL', 'COMPETENCY_REAPPLICATION'], documentType: 'COMPETENCY_RENEWAL_FORM',
+    applicationTypes: ['COMPETENCY_RENEWAL'], documentType: 'COMPETENCY_RENEWAL_FORM',
     sourceAuthority: 'South African Police Service', sourceUrl: '/saps-templates/SAPS_517_G_EN_OFFICIAL.pdf', instructionsUrl: null,
     versionLabel: 'Pinned official SAPS English template (SHA-256 E96519DE015230B9E4B38B6E27C57EEB7EE4BE0DE626CDC61CF5AADC5C37428E)', fields: SAPS_517_G_FIELDS,
   },
@@ -174,5 +184,6 @@ export function getSapsTemplate(code: AutofillFormCode): SapsTemplateDefinition 
 }
 
 export function getSapsTemplateForApplicationType(type: ApplicationCaseType): SapsTemplateDefinition {
-  return Object.values(REGISTRY).find((template) => template.applicationTypes.includes(type)) ?? REGISTRY.APPLICATION_WORKSHEET;
+  assertApplicationTypeSupportedInBeta(type);
+  return REGISTRY[getAutofillFormCode(type)];
 }

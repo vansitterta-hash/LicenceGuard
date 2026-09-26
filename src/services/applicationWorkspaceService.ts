@@ -31,6 +31,8 @@ export async function saveApplicationDraft(
     .from('application_cases')
     .update({ updated_by: userId, updated_at: savedAt })
     .eq('id', applicationCaseId)
+    .not('status', 'in', '("SUBMITTED","APPROVED","DECLINED","WITHDRAWN","CLOSED")')
+    .not('application_type', 'in', '("TEMPORARY_AUTHORISATION","APPEAL_OR_RECONSIDERATION")')
     .select('updated_at')
     .single();
 

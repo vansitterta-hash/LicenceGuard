@@ -1,3 +1,5 @@
+import type { Saps271Declarations } from './saps271Declarations';
+
 export type NotificationChannel =
   | 'WHATSAPP'
   | 'EMAIL'
@@ -6,6 +8,7 @@ export type NotificationChannel =
   | 'MANUAL';
 
 export type ClientRecord = {
+  saps271_declarations?: Saps271Declarations | null;
   id: string;
 
   dealer_id: string;
@@ -39,6 +42,7 @@ export type ClientRecord = {
 };
 
 export type ClientFormValues = {
+  saps271Declarations?: Saps271Declarations | null;
   firstName: string;
   surname: string;
 

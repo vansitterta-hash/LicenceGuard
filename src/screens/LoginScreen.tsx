@@ -1,7 +1,8 @@
+import { requestPasswordReset } from '../services/passwordService';
+import { userAlert as Alert } from '../utils/userAlert';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -21,7 +22,19 @@ import { Colors } from '../theme/colors';
 export default function LoginScreen() {
   const { signIn, loading } = useAuth();
 
-  const [email, setEmail] = useState('vansitterta@gmail.com');
+  const [email, setEmail] = useState('');
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const forgotPassword = async () => {
+    if (resetBusy) return;
+    setResetBusy(true);
+    try {
+      if (typeof window === 'undefined') throw new Error('Open LicenceGuard in your browser to reset your password.');
+      await requestPasswordReset(email, window.location.href);
+      setResetMessage('If an account exists for this email, a password reset link will be sent. Check your inbox.');
+    } catch (error) { setResetMessage(error instanceof Error ? error.message : 'Unable to request a reset link.'); }
+    finally { setResetBusy(false); }
+  };
   const [password, setPassword] = useState('');
 
   const handleLogin = async () => {
@@ -171,6 +184,8 @@ export default function LoginScreen() {
                 )}
               </Pressable>
 
+              <Pressable disabled={resetBusy || loading} onPress={() => void forgotPassword()}><Text style={styles.helpText}>{resetBusy ? 'Sending reset link...' : 'Forgot Password?'}</Text></Pressable>
+              {resetMessage ? <Text accessibilityRole="alert" style={styles.helpText}>{resetMessage}</Text> : null}
               <Text style={styles.helpText}>
                 Use an authorised LicenceGuard dealer
                 account.

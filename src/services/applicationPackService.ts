@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import { assertRequiredDigitalDocumentMerged } from '../utils/applicationPackPolicy';
 import { getClientApplicationReadiness } from './applicationReadinessService';
 import { getApplicationCase } from './applicationCaseService';
@@ -103,14 +104,14 @@ function findRequirementDocument(
       (document) =>
         (requirement.acceptableDocumentTypes ?? [requirement.documentType]).includes(document.document_type) &&
         document.lifecycle_status === 'ACTIVE' &&
-        documentMatchesCase(
+        (requirement.documentId ? document.id === requirement.documentId : documentMatchesCase(
           document,
           requirement,
           applicationCaseId,
           competencyId,
           firearmId,
           firearmLicenceId
-        )
+        ))
     )
     .sort((left, right) => {
       if (left.is_verified !== right.is_verified) {
@@ -217,6 +218,8 @@ export async function buildApplicationPackManifest(
       'The selected application case is closed or could not be found in the readiness engine.'
     );
   }
+
+  assertApplicationTypeSupportedInBeta(applicationCase.application_type);
 
   const items: ApplicationPackItem[] =
     readiness.requirements

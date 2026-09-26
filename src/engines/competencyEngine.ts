@@ -1,3 +1,4 @@
+import { removeSafeRecord } from '../services/safeDeletionService';
 import { supabase } from '../lib/supabase';
 import type {
   CompetencyCategory,
@@ -390,13 +391,5 @@ export async function deleteCompetency(
   competencyId: string,
   dealerId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('competencies')
-    .delete()
-    .eq('id', competencyId)
-    .eq('dealer_id', dealerId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await removeSafeRecord('competencies', competencyId, dealerId);
 }

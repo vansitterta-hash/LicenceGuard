@@ -1,6 +1,7 @@
 import type { ApplicationCaseType } from './applicationCase';
 import type { CompetencyCategory } from './competency';
 import type { FirearmType } from './firearm';
+import type { Saps271Declarations } from './saps271Declarations';
 
 export type AutofillFormCode =
   | 'SAPS_271'
@@ -76,6 +77,8 @@ export type AutofillApplicationData = {
 };
 
 export type ApplicationAutofillPackage = {
+  saps271Declarations?: Saps271Declarations | null;
+  saps271DeclarationFields?: Record<string, string>;
   generatedAt: string;
   applicant: AutofillApplicantData;
   firearm: AutofillFirearmData | null;

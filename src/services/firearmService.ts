@@ -1,3 +1,4 @@
+import { removeSafeRecord } from '../services/safeDeletionService';
 import { supabase } from '../lib/supabase';
 import type {
   FirearmFormValues,
@@ -390,18 +391,7 @@ export async function archiveFirearm(
   dealerId: string,
   userId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('firearms')
-    .update({
-      is_active: false,
-      updated_by: userId,
-    })
-    .eq('id', firearmId)
-    .eq('dealer_id', dealerId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await removeSafeRecord('firearms', firearmId, dealerId);
 }
 
 export function getFirearmTypeLabel(

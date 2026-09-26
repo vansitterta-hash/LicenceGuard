@@ -34,6 +34,7 @@ import { Colors } from '../theme/colors';
 import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
+import Saps271DeclarationsSection from '../components/client/Saps271DeclarationsSection';
 import type {
   ClientFormValues,
   NotificationChannel,
@@ -164,6 +165,7 @@ export default function ClientFormScreen({
           province: client.province ?? '',
           postalCode: client.postal_code ?? '',
           notes: client.notes ?? '',
+          saps271Declarations: client.saps271_declarations ?? null,
         });
       } catch (error) {
         Alert.alert(
@@ -339,6 +341,8 @@ export default function ClientFormScreen({
           firearm licence and competency renewal management.
         </Text>
       </View>
+
+      <Saps271DeclarationsSection value={form.saps271Declarations} disabled={saving} onChange={(value) => updateField('saps271Declarations', value)} />
 
       <Card
         subtitle="The firearm owner’s primary identifying information."

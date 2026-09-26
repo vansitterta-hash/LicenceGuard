@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import {
   DarkTheme,
   NavigationContainer,
@@ -42,6 +43,16 @@ const licenceGuardNavigationTheme: Theme = {
 export default function AppNavigator() {
   return (
     <NavigationContainer
+      linking={{
+        prefixes: [Linking.createURL('/')],
+        config: { screens: {
+          Dashboard: '',
+          Clients: 'clients',
+          ClientProfile: 'clients/:clientId',
+          ApplicationCaseForm: 'clients/:clientId/application/:applicationCaseId?',
+          ApplicationReadiness: 'clients/:clientId/readiness/:applicationCaseId?',
+        } },
+      }}
       theme={licenceGuardNavigationTheme}
     >
       <Stack.Navigator

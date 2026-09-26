@@ -1,3 +1,4 @@
+import { removeSafeRecord } from '../services/safeDeletionService';
 import { supabase } from '../lib/supabase';
 import type {
   ClientFormValues,
@@ -37,6 +38,7 @@ function buildClientPayload(
     postal_code: emptyToNull(values.postalCode),
 
     notes: emptyToNull(values.notes),
+    ...(values.saps271Declarations !== undefined ? { saps271_declarations: values.saps271Declarations } : {}),
 
     updated_by: userId,
   };
@@ -208,16 +210,5 @@ export async function archiveClient(
   dealerId: string,
   userId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('clients')
-    .update({
-      is_active: false,
-      updated_by: userId,
-    })
-    .eq('id', clientId)
-    .eq('dealer_id', dealerId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await removeSafeRecord('clients', clientId, dealerId);
 }

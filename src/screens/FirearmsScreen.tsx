@@ -1,3 +1,4 @@
+import { userAlert as Alert } from '../utils/userAlert';
 import {
   useCallback,
   useEffect,
@@ -5,7 +6,6 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   View,
