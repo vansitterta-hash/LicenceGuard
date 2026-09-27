@@ -18,10 +18,10 @@ create policy "Dealer members can read application workspace events"
   using (
     exists (
       select 1 from public.application_cases ac
-      join public.dealer_memberships dm on dm.dealer_id = ac.dealer_id
+      join public.dealer_users du on du.dealer_id = ac.dealer_id
       where ac.id = application_workspace_events.application_case_id
-        and dm.user_id = auth.uid()
-        and dm.is_active = true
+        and du.user_id = auth.uid()
+        and du.is_active = true
     )
   );
 
@@ -30,9 +30,9 @@ create policy "Dealer members can add application workspace events"
   with check (
     exists (
       select 1 from public.application_cases ac
-      join public.dealer_memberships dm on dm.dealer_id = ac.dealer_id
+      join public.dealer_users du on du.dealer_id = ac.dealer_id
       where ac.id = application_workspace_events.application_case_id
-        and dm.user_id = auth.uid()
-        and dm.is_active = true
+        and du.user_id = auth.uid()
+        and du.is_active = true
     )
   );
