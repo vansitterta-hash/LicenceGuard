@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 type DealerProfile = {
   dealerId: string;
   dealerName: string;
-  role: 'owner' | 'administrator' | 'staff';
+  role: 'owner' | 'administrator' | 'staff' | 'tester';
   fullName: string | null;
 };
 
@@ -97,6 +97,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     const membership = rows[0];
+
+    if (membership.role === 'tester') {
+      setDealerProfile(null);
+      throw new Error(
+        'Tester accounts must use a dedicated test workspace. Production personal data is not available in this workspace.'
+      );
+    }
+
     const dealer = Array.isArray(membership.dealers)
       ? membership.dealers[0]
       : membership.dealers;

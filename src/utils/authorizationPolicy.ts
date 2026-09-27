@@ -20,6 +20,10 @@ export function isTestWorkspace(workspaceKind?: WorkspaceKind | null): boolean {
   return workspaceKind === 'TEST';
 }
 
+export function isTesterRole(role?: string | null): boolean {
+  return role === 'tester';
+}
+
 export function requiresExplicitPrivateAccess(scope?: RecordScope | null): boolean {
   return scope === 'PRIVATE' || scope == null;
 }
@@ -36,4 +40,35 @@ export function isExplicitPermission(permission: string): permission is DealerPe
     'documents.write',
     'test.workspace.access',
   ].includes(permission);
+}
+
+export function testerMustUseDedicatedWorkspace(role?: string | null, workspaceKind?: WorkspaceKind | null): boolean {
+  return isTesterRole(role) && isProductionWorkspace(workspaceKind);
+}
+
+export function canAccessPrivateRecord({
+  currentUserId,
+  ownerUserId,
+  scope,
+  role,
+  hasExplicitGrant,
+  isAdministrativeAccess,
+}: {
+  currentUserId: string | null;
+  ownerUserId?: string | null;
+  scope?: RecordScope | null;
+  role?: string | null;
+  hasExplicitGrant?: boolean;
+  isAdministrativeAccess?: boolean;
+}): boolean {
+  if (!currentUserId) return false;
+  if (ownerUserId && ownerUserId === currentUserId) return true;
+  if (isAdministrativeAccess) return true;
+  if (requiresExplicitPrivateAccess(scope)) {
+    return Boolean(hasExplicitGrant);
+  }
+  if (role === 'staff' || role === 'administrator' || role === 'owner') {
+    return Boolean(hasExplicitGrant) || Boolean(isAdministrativeAccess);
+  }
+  return false;
 }
