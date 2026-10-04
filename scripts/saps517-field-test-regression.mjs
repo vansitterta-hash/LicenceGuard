@@ -199,7 +199,8 @@ const form = { firstName:'Example',surname:'Applicant',idNumber:client.id_number
 const saved = await clients.updateClient('client','dealer','user',form);
 assert.deepEqual(saved.saps271_declarations,profile);
 assert.deepEqual(payload.saps271_declarations.answers,profile.answers);
-assert.deepEqual(filters,[['id','client'],['dealer_id','dealer']]);
+assert.deepEqual(filters.slice(0,4),[['id','client'],['dealer_id','dealer'],['id','client'],['dealer_id','dealer']]);
+assert.equal(filters[4][0], 'saps271_declarations', 'Concurrent JSON edits must not be overwritten');
 delete form.saps271Declarations;
 await clients.updateClient('client','dealer','user',form);
 assert.equal('saps271_declarations' in payload,false);

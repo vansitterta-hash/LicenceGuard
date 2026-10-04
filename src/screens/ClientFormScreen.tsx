@@ -256,7 +256,7 @@ export default function ClientFormScreen({
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSave = async () => {
+  const handleSave = async (declarations = form.saps271Declarations) => {
     if (!validate()) {
       Alert.alert(
         'Check client details',
@@ -278,6 +278,7 @@ export default function ClientFormScreen({
     try {
       const normalisedForm: ClientFormValues = {
         ...form,
+        saps271Declarations: declarations,
         idNumber: form.idNumber.replace(/\s/g, ''),
       };
 
@@ -347,7 +348,7 @@ export default function ClientFormScreen({
         </Text>
       </View>
 
-      <Saps271DeclarationsSection value={form.saps271Declarations} disabled={saving} onChange={(value) => updateField('saps271Declarations', value)} />
+      <Saps271DeclarationsSection value={form.saps271Declarations} disabled={saving} onChange={(value) => updateField('saps271Declarations', value)} onConfirm={(value) => { updateField('saps271Declarations', value); void handleSave(value); }} />
       <Saps517ApplicantSection
         value={form.saps271Declarations}
         idNumber={form.idNumber}

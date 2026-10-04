@@ -46,6 +46,7 @@ export type Saps517ApplicantData = {
   under21OtherDetails: string;
 };
 export type Saps271Declarations = {
+  applications?: Record<string, import('../utils/applicationFormAnswers').ApplicationFormAnswers>;
   answers: Record<DeclarationKey, { answer: DeclarationAnswer; incidents: DeclarationIncident[] }>;
   confirmedAt: string | null;
   saps517?: Saps517ApplicantData;

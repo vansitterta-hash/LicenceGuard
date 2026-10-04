@@ -184,13 +184,22 @@ export async function updateClient(
   userId: string,
   values: ClientFormValues
 ): Promise<ClientRecord> {
-  const { data, error } = await supabase
+  // Profile editing must preserve newer case-specific answers saved by the
+  // application editor. Compare the JSON snapshot to reject concurrent edits.
+  let original: ClientRecord['saps271_declarations'] | undefined;
+  if (values.saps271Declarations !== undefined) {
+    const current = await supabase.from('clients').select('saps271_declarations').eq('id', clientId).eq('dealer_id', dealerId).single();
+    if (current.error || !current.data) throw new Error('Unable to load the current declaration profile.');
+    original = current.data.saps271_declarations;
+    values = { ...values, saps271Declarations: values.saps271Declarations ? { ...values.saps271Declarations, ...(original?.applications ? { applications: original.applications } : {}) } : original };
+  }
+  let query = supabase
     .from('clients')
     .update(buildClientPayload(dealerId, userId, values))
     .eq('id', clientId)
-    .eq('dealer_id', dealerId)
-    .select('*')
-    .single();
+    .eq('dealer_id', dealerId);
+  if (values.saps271Declarations !== undefined) query = original == null ? query.is('saps271_declarations', null) : query.eq('saps271_declarations', JSON.stringify(original));
+  const { data, error } = await query.select('*').single();
 
   if (error) {
     if (error.code === '23505') {

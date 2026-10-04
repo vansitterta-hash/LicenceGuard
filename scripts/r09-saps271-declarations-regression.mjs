@@ -40,7 +40,7 @@ const rows = { clients: client, application_cases: [applicationCase], competenci
 const db = { from(table) {
   let single = false, payload;
   const q = {
-    select() { return q; }, eq() { return q; }, not() { return q; }, order() { return q; },
+    select() { return q; }, eq() { return q; }, is() { return q; }, not() { return q; }, order() { return q; },
     single() { single = true; return q; }, maybeSingle() { single = true; return q; },
     insert(value) { writes.push(['insert', table, structuredClone(value)]); payload = value; return q; },
     update(value) { writes.push(['update', table, structuredClone(value)]); payload = value; return q; },

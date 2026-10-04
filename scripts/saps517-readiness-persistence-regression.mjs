@@ -15,12 +15,12 @@ const db = { from(table) {
   const filters = [];
   const query = {
     select() { return query; }, order() { return query; },
-    eq(key, value) { filters.push(row => row[key] === value); return query; },
+    eq(key, value) { filters.push(row => key === 'saps271_declarations' ? JSON.stringify(row[key]) === value : row[key] === value); return query; },
     single() { single = true; return query; },
     update(value) { assert.equal(table, 'clients'); payload = value; return query; },
     then(resolve, reject) {
       if (payload) { assert.ok(filters.every(f => f(stored))); stored = clone({ ...stored, ...payload }); }
-      const result = (table === 'clients' ? [stored] : rows[table]).filter(row => filters.every(f => f(row)));
+      const result = payload ? [stored] : (table === 'clients' ? [stored] : rows[table]).filter(row => filters.every(f => f(row)));
       return Promise.resolve({ data: clone(single ? result[0] : result), error: null }).then(resolve, reject);
     },
   };

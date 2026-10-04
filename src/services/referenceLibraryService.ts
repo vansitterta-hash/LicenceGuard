@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { supabase } from '../lib/supabase';
+import { generatedDocumentPrivacy } from './generatedApplicationDocumentService';
 import type { ReferenceLibraryItem } from '../data/referenceLibrary';
 import type { DocumentRecord } from '../types/document';
 
@@ -143,9 +144,11 @@ export async function addReferenceDocumentToClient(
     throw new Error(upload.error.message);
   }
 
+  const privacy = generatedDocumentPrivacy(input.userId);
   const insert = await db
     .from('documents')
     .insert({
+      ...privacy,
       dealer_id: input.dealerId,
       client_id: input.clientId,
       competency_id: null,
@@ -208,9 +211,7 @@ export async function addReferenceDocumentToClient(
         personalisation: input.personalisation ?? null,
       },
       uploaded_by: input.userId,
-    })
-    .select('*')
-    .single();
+    });
 
   if (insert.error) {
     await db.storage
@@ -220,5 +221,7 @@ export async function addReferenceDocumentToClient(
     throw new Error(insert.error.message);
   }
 
-  return insert.data as DocumentRecord;
+  const saved = await db.from('documents').select('*').eq('storage_path', storagePath).eq('client_id', input.clientId).eq('dealer_id', input.dealerId).eq('owner_user_id', input.userId).eq('record_scope', 'PRIVATE').single();
+  if (saved.error || !saved.data) throw new Error('Reference document saved but could not be read back. Reload before retrying.');
+  return saved.data as DocumentRecord;
 }

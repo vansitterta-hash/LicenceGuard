@@ -59,8 +59,9 @@ const supabase = {
   from: () => ({
     insert: (record) => {
       stored.push(record);
-      return { select: () => ({ single: async () => ({ data: { ...record, id: 'document-1' }, error: null }) }) };
+      return Promise.resolve({ error: null });
     },
+    select: () => { const q = { eq: () => q, single: async () => ({ data: { ...stored.at(-1), id: 'document-1' }, error: null }) }; return q; },
   }),
 };
 const documentService = loader({

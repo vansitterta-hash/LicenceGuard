@@ -267,7 +267,7 @@ export async function renderOfficialPdfTemplate(input: {
     }
 
     const lines = splitText(value, font, size, element.width, element.maxLines ?? 1);
-    if ((element.fieldId.startsWith('applicant.declarations.') || element.fieldId.startsWith('applicant.saps517.declarations.') || element.fieldId === 'applicant.saps517.under21OtherDetails') && element.kind === 'TEXT' && lines.join(' ') !== value.trim().replace(/\s+/g, ' ')) {
+    if ((element.fieldId.startsWith('application.form.') || element.fieldId.startsWith('applicant.declarations.') || element.fieldId.startsWith('applicant.saps517.declarations.') || element.fieldId === 'applicant.saps517.under21OtherDetails') && element.kind === 'TEXT' && lines.join(' ') !== value.trim().replace(/\s+/g, ' ')) {
       throw new Error(`${input.template.code} declaration field ${element.fieldId} exceeds the available form space. Review the detail before generating; declaration text cannot be truncated.`);
     }
     const lineHeight = element.lineHeight ?? size + 1;

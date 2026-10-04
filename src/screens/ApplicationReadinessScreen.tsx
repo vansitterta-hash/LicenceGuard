@@ -152,6 +152,11 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     [applicationDocuments]
   );
 
+  useEffect(() => {
+    const saved = applicationDocuments.find(document => document.application_case_id === applicationCase?.caseId && document.metadata?.source === 'EXTERNAL_RESEARCH_PROVIDER');
+    setLiveResearch((saved?.metadata?.researchContext as ApplicationResearchContext | undefined) ?? null);
+  }, [applicationDocuments, applicationCase?.caseId]);
+
   const findRequirementDocument = useCallback(
     (requirement: ReadinessRequirement) => {
       if (!applicationCase || !requirement.documentType) return undefined;
@@ -414,7 +419,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 
   const openRequirement = (requirement: ReadinessRequirement) => {
-    if (requirement.key === 'SAPS517_APPLICANT_DATA') {
+    if (['SAPS517_APPLICANT_DATA', 'SAPS271_DECLARATIONS'].includes(requirement.key)) {
       navigation.navigate('ClientForm', { clientId: route.params.clientId });
       return;
     }

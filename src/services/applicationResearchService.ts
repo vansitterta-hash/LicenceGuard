@@ -1,5 +1,6 @@
 import { REFERENCE_LIBRARY_ITEMS, type ReferenceLibraryItem } from '../data/referenceLibrary';
 import { supabase } from '../lib/supabase';
+import { generatedDocumentPrivacy, registerGeneratedDocument } from './generatedApplicationDocumentService';
 import type { ApplicationResearchContext, ResearchSource, ResearchSubjectType } from '../types/research';
 
 export async function requestLiveApplicationResearch(input: {
@@ -63,10 +64,11 @@ export async function archiveLiveApplicationResearch(input: {
   firearmId: string;
   context: ApplicationResearchContext;
 }): Promise<void> {
+  const privacy = generatedDocumentPrivacy(input.userId);
   const externalSources = input.context.sources.filter((source) => source.sourceKind === 'EXTERNAL_PROVIDER');
   if (externalSources.length === 0) throw new Error('The live provider returned no source results to archive.');
 
-  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const { PDFDocument, StandardFonts } = await import('pdf-lib/cjs/index.js');
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -116,7 +118,8 @@ export async function archiveLiveApplicationResearch(input: {
   });
   if (upload.error) throw new Error(upload.error.message);
 
-  const inserted = await (supabase as any).from('documents').insert({
+  await registerGeneratedDocument({
+    ...privacy,
     dealer_id: input.dealerId,
     client_id: input.clientId,
     competency_id: null,
@@ -150,12 +153,7 @@ export async function archiveLiveApplicationResearch(input: {
       trustLevel: 'UNREVIEWED',
     },
     uploaded_by: input.userId,
-  }).select('id').single();
-
-  if (inserted.error) {
-    await (supabase as any).storage.from('licenceguard-documents').remove([storagePath]);
-    throw new Error(inserted.error.message);
-  }
+  });
 }
 
 function normalise(value: string | null | undefined): string {
@@ -282,9 +280,10 @@ export function buildApplicationResearchContext(input: {
       const disciplineMatched = Boolean(disciplineTerm && (
         itemDiscipline === disciplineTerm || itemText.includes(disciplineTerm)
       ));
-      return { item, calibreMatched, disciplineMatched };
+      const calibreConflict = Boolean(requestedFamily && itemFamilies.size && !calibreMatched);
+      return { item, calibreMatched, disciplineMatched, calibreConflict };
     })
-    .filter(({ calibreMatched, disciplineMatched }) => calibreMatched || disciplineMatched)
+    .filter(({ calibreMatched, disciplineMatched, calibreConflict }) => !calibreConflict && (calibreMatched || disciplineMatched))
     .sort((left, right) => Number(right.disciplineMatched) - Number(left.disciplineMatched))
     .slice(0, 6);
 

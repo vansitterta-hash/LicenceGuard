@@ -113,6 +113,7 @@ export type AutofillApplicationData = {
 };
 
 export type ApplicationAutofillPackage = {
+  formFields?: Record<string, string>;
   saps271Declarations?: Saps271Declarations | null;
   saps271DeclarationFields?: Record<string, string>;
   saps517Applicant?: AutofillSaps517ApplicantData;

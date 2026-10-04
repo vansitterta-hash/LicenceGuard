@@ -90,9 +90,18 @@ const SAPS_517_FIELDS: SapsTemplateDefinition['fields'] = [
 ];
 
 const SAPS_517_A_FIELDS: SapsTemplateDefinition['fields'] = [
+  { key: 'application.form.identificationType', label: 'identificationType', section: 'Applicant form answers', required: true },
+  { key: 'application.form.furtherCategories', label: 'furtherCategories', section: 'Applicant form answers', required: true },
+  { key: 'application.form.previousCategory', label: 'previousCategory', section: 'Applicant form answers', required: true },
+  { key: 'application.form.previousNumber', label: 'previousNumber', section: 'Applicant form answers', required: true },
+  { key: 'application.form.previousIssueDate', label: 'previousIssueDate', section: 'Applicant form answers', required: true },
+  { key: 'application.form.previousExpiryDate', label: 'previousExpiryDate', section: 'Applicant form answers', required: false },
+  { key: 'application.form.associationMember', label: 'associationMember', section: 'Applicant form answers', required: true },
+  { key: 'application.form.associationName', label: 'associationName', section: 'Applicant form answers', required: false },
+  { key: 'application.form.associationNumber', label: 'associationNumber', section: 'Applicant form answers', required: false },
+  { key: 'application.form.associationJoined', label: 'associationJoined', section: 'Applicant form answers', required: false },
   ...SAPS517A_DECLARATION_TEMPLATE_FIELDS,
   { key: 'application.type', label: 'Application for a further competency certificate', section: 'Type of competency certificate', required: true },
-  { key: 'competency.category', label: 'Selected competency category', section: 'Type of competency certificate', required: true },
   { key: 'applicant.idNumber', label: 'Identity number', section: 'Applicant particulars', required: true },
   { key: 'applicant.surname', label: 'Surname', section: 'Applicant particulars', required: true },
   { key: 'applicant.firstNames', label: 'Full names', section: 'Applicant particulars', required: true },
@@ -103,15 +112,17 @@ const SAPS_517_A_FIELDS: SapsTemplateDefinition['fields'] = [
   { key: 'applicant.postalCode', label: 'Postal code', section: 'Applicant particulars', required: false },
   { key: 'applicant.cellphone', label: 'Cellphone number', section: 'Applicant particulars', required: false },
   { key: 'applicant.email', label: 'Email address', section: 'Applicant particulars', required: false },
-  { key: 'competency.certificateNumber', label: 'Current competency certificate number', section: 'Current competency certificate', required: false },
-  { key: 'competency.issueDate', label: 'Current competency issue date', section: 'Current competency certificate', required: false },
-  { key: 'competency.expiryDate', label: 'Current competency expiry date', section: 'Current competency certificate', required: false },
   { key: 'application.policeStation', label: 'Police station / DFO', section: 'Application administration', required: false },
   { key: 'application.reference', label: 'Application reference', section: 'Application administration', required: false },
   { key: 'application.openedDate', label: 'Application opened date', section: 'Application administration', required: false },
 ];
 
 const SAPS_517_G_FIELDS: SapsTemplateDefinition['fields'] = [
+  { key: 'application.form.identificationType', label: 'identificationType', section: 'Applicant form answers', required: true },
+  { key: 'application.form.before90', label: 'before90', section: 'Applicant form answers', required: true },
+  { key: 'application.form.afterExpiry', label: 'afterExpiry', section: 'Applicant form answers', required: true },
+  { key: 'application.form.before90Reason', label: 'before90Reason', section: 'Applicant form answers', required: false },
+  { key: 'application.form.afterExpiryReason', label: 'afterExpiryReason', section: 'Applicant form answers', required: false },
   { key: 'application.type', label: 'Competency certificate renewal', section: 'Renewal type', required: true },
   { key: 'competency.category', label: 'Current competency category', section: 'Original competency certificate', required: true },
   { key: 'competency.certificateNumber', label: 'Current competency certificate number', section: 'Original competency certificate', required: true },
@@ -133,6 +144,13 @@ const SAPS_517_G_FIELDS: SapsTemplateDefinition['fields'] = [
 ];
 
 const SAPS_518_A_FIELDS: SapsTemplateDefinition['fields'] = [
+  { key: 'application.form.identificationType', label: 'identificationType', section: 'Applicant form answers', required: true },
+  { key: 'application.form.before90', label: 'before90', section: 'Applicant form answers', required: true },
+  { key: 'application.form.afterExpiry', label: 'afterExpiry', section: 'Applicant form answers', required: true },
+  { key: 'application.form.before90Reason', label: 'before90Reason', section: 'Applicant form answers', required: false },
+  { key: 'application.form.afterExpiryReason', label: 'afterExpiryReason', section: 'Applicant form answers', required: false },
+  { key: 'application.form.beforeExpiry', label: 'beforeExpiry', section: 'Applicant form answers', required: true },
+  { key: 'application.form.beforeExpiryReason', label: 'beforeExpiryReason', section: 'Applicant form answers', required: false },
   { key: 'application.section13', label: 'Section 13 - Self-defence', section: 'Licence category', required: false },
   { key: 'application.section14', label: 'Section 14 - Restricted self-defence', section: 'Licence category', required: false },
   { key: 'application.section15', label: 'Section 15 - Occasional hunting or sport shooting', section: 'Licence category', required: false },

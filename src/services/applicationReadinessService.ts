@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { declarationReadinessIssues } from '../utils/saps271Declarations';
 import { saps517RequiredProfileIssues } from '../utils/saps517Applicant';
+import { evaluateApplicationForm } from '../utils/applicationFormAnswers';
 import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import type { Saps271Declarations } from '../types/saps271Declarations';
 import { isApplicationTypeSupportedInBeta, UNSUPPORTED_APPLICATION_TYPE_MESSAGE } from '../utils/unsupportedApplicationTypePolicy';
@@ -94,13 +95,13 @@ const REQUIREMENTS: Partial<Record<ApplicationCaseType, RequirementDefinition[]>
     ...COMMON,
     { key: 'COMPETENCY_APPLICATION', label: 'Competency application form', detail: 'The applicable SAPS competency application form.', documentType: 'COMPETENCY_APPLICATION', required: true },
     { key: 'COMPETENCY_CERTIFICATE', label: 'Existing competency certificate', detail: 'Copy of the client’s existing competency certificate.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
-    { key: 'MOTIVATION', label: 'Competency motivation', detail: 'Motivation supporting the additional category.', documentType: 'MOTIVATION', required: true },
+    { key: 'MOTIVATION', label: 'Competency motivation', detail: 'Motivation supporting the additional category.', documentType: 'MOTIVATION', required: false },
   ],
   COMPETENCY_RENEWAL: [
     ...COMMON,
     { key: 'COMPETENCY_RENEWAL_FORM', label: 'Competency renewal form', detail: 'The applicable SAPS competency renewal form.', documentType: 'COMPETENCY_RENEWAL_FORM', required: true },
     { key: 'COMPETENCY_CERTIFICATE', label: 'Existing competency certificate', detail: 'Copy of the competency being renewed.', documentType: 'COMPETENCY_CERTIFICATE', required: true },
-    { key: 'MOTIVATION', label: 'Renewal motivation', detail: 'Motivation supporting the renewal.', documentType: 'MOTIVATION', required: true },
+    { key: 'MOTIVATION', label: 'Renewal motivation', detail: 'Motivation supporting the renewal.', documentType: 'MOTIVATION', required: false },
   ],
   COMPETENCY_REAPPLICATION: [
     ...COMMON,
@@ -233,7 +234,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
   const [clientResult, casesResult, competenciesResult, firearmsResult, licencesResult, documentsResult] = await Promise.all([
     db.from('clients').select('first_name,surname,id_number,address_line_1,city,province,postal_code,saps271_declarations').eq('id', clientId).single(),
     db.from('application_cases').select('*').eq('client_id', clientId).order('opened_date', { ascending: false }),
-    db.from('competencies').select('id,category,certificate_number,issue_date,verified').eq('client_id', clientId),
+    db.from('competencies').select('id,category,certificate_number,issue_date,expiry_date,verified').eq('client_id', clientId),
     db.from('firearms').select('id,make,model,calibre,serial_number,required_competency').eq('client_id', clientId).eq('is_active', true),
     db.from('firearm_licences').select('id,firearm_id,licence_number,licence_section,issue_date,expiry_date').eq('client_id', clientId),
     db.from('documents').select('*').eq('client_id', clientId).eq('lifecycle_status', 'ACTIVE'),
@@ -263,6 +264,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       competencies, category, applicationCase.competency_id,
       applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY'
     );
+    const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies, competency: matchingCompetency, licence });
     const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
     const definitions: RequirementDefinition[] = baseDefinitions.map((definition) => ({ ...definition }));
     if (applicationCase.competency_id && !matchingCompetency) {
@@ -327,7 +329,15 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
           : Boolean(applicationCase.supplier_name?.trim() && applicationCase.supplier_id_or_registration?.trim());
         state = complete ? 'SATISFIED' : 'MISSING';
       } else if (definition.key === 'COMPETENCY_CERTIFICATE') {
-        state = !matchingCompetency || !matchingCompetency.certificate_number || !matchingCompetency.issue_date
+        if (applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY') {
+          const priorIds = new Set(form.previousCompetencies.map(c => c.id));
+          const proof = documents.filter(d => d.document_type === 'COMPETENCY_CERTIFICATE' && d.lifecycle_status === 'ACTIVE' && Boolean(d.competency_id && priorIds.has(d.competency_id)))
+            .sort((a, b) => Number(b.is_verified) - Number(a.is_verified))[0];
+          documentId = proof?.id;
+        }
+        state = applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY' && form.previousCompetencies.length > 0
+          ? form.previousCompetencies.every(c => c.certificate_number && c.issue_date && c.verified) ? 'SATISFIED' : 'UNVERIFIED'
+          : !matchingCompetency || !matchingCompetency.certificate_number || !matchingCompetency.issue_date
           ? 'MISSING'
           : matchingCompetency.verified ? 'SATISFIED' : 'UNVERIFIED';
       } else if (definition.key === 'SAPS517_APPLICANT_DATA') {
@@ -368,18 +378,8 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       requirements.unshift({ key: 'MATCHING_COMPETENCY', label: `Matching ${firearm.required_competency.toLowerCase()} competency`, detail: 'The firearm cannot proceed without the matching competency category.', state: 'MISSING', required: true, documentType: null, delivery: 'DIGITAL' });
     }
 
-    if (licence?.issue_date && licence.expiry_date) {
-      const expectedYears = sectionExpectedYears(applicationCase.licence_section ?? licence.licence_section);
-      if (expectedYears) {
-        const issue = new Date(`${licence.issue_date}T00:00:00`);
-        const expected = new Date(issue);
-        expected.setFullYear(expected.getFullYear() + expectedYears);
-        const recorded = new Date(`${licence.expiry_date}T00:00:00`);
-        const difference = Math.abs(expected.getTime() - recorded.getTime()) / DAY_MS;
-        if (difference > 31) {
-          requirements.unshift({ key: 'LICENCE_TERM_REVIEW', label: 'Licence term requires review', detail: `Section ${applicationCase.licence_section ?? licence.licence_section} is expected to use a ${expectedYears}-year term. Verify the recorded expiry date.`, state: 'UNVERIFIED', required: true, documentType: null, delivery: 'DIGITAL' });
-        }
-      }
+    if (!['COMPETENCY_FIRST_APPLICATION', 'COMPETENCY_REAPPLICATION'].includes(applicationCase.application_type)) {
+      requirements.push({ key: 'APPLICATION_FORM_ANSWERS', label: 'Application form answers', detail: form.issues.join(' ') || 'Required applicant answers are saved.', documentType: null, required: true, delivery: 'DIGITAL', state: form.issues.length ? 'MISSING' : 'SATISFIED' });
     }
 
     if (['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.application_type)) {

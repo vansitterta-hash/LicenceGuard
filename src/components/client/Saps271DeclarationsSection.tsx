@@ -8,9 +8,10 @@ import { Spacing } from '../../theme/spacing';
 import type { DeclarationAnswer, DeclarationKey, Saps271Declarations } from '../../types/saps271Declarations';
 import { DECLARATION_QUESTIONS, DECLARATION_DETAIL_LABELS, declarationDataIssues, emptySaps271Declarations } from '../../utils/saps271Declarations';
 
-export default function Saps271DeclarationsSection({ value, onChange, disabled = false }: {
+export default function Saps271DeclarationsSection({ value, onChange, onConfirm, disabled = false }: {
   value?: Saps271Declarations | null;
   onChange?: (next: Saps271Declarations) => void;
+  onConfirm?: (next: Saps271Declarations) => void;
   disabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -45,7 +46,7 @@ export default function Saps271DeclarationsSection({ value, onChange, disabled =
       })}
       {onChange ? <>
         <Text style={{ color: Colors.textMuted }}>{issues.length ? 'Answer all questions and complete the applicable incident details before confirming. You can save incomplete declarations.' : 'Confirm that the client has reviewed these answers for their current SAPS 271 application(s), then save the client.'}</Text>
-        <Button title="Confirm declarations reviewed now" disabled={disabled || issues.length > 0} onPress={() => onChange({ ...declarations, confirmedAt: new Date().toISOString() })} />
+        <Button title={onConfirm ? 'Confirm and save declarations' : 'Confirm declarations reviewed now'} disabled={disabled || issues.length > 0} onPress={() => (onConfirm ?? onChange)({ ...declarations, confirmedAt: new Date().toISOString() })} />
       </> : null}
     </View> : null}
   </Card>;

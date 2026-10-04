@@ -43,6 +43,7 @@ const SAPS517_APPLICANT_FIELDS: DocumentFieldDefinition[] = [
 ];
 
 const FIELDS: DocumentFieldDefinition[] = [
+  ...['identificationType', 'furtherCategories', 'furtherHANDGUN', 'furtherRIFLE', 'furtherSHOTGUN', 'previousCategory', 'previousNumber', 'previousIssueDate', 'previousExpiryDate', 'associationMember', 'associationName', 'associationNumber', 'associationJoined', 'before90', 'beforeExpiry', 'afterExpiry', 'before90Reason', 'beforeExpiryReason', 'afterExpiryReason'].map(key => ({ id: `application.form.${key}` as DocumentFieldId, label: key, dataType: 'TEXT' as const, sourcePath: `data.formFields.${key}`, normalise: 'TRIM' as const })),
   ...SAPS271_DECLARATION_FIELDS,
   ...SAPS517_APPLICANT_FIELDS,
   { id: 'application.type', label: 'Application type', dataType: 'CHOICE', sourcePath: 'data.application.applicationType', normalise: 'TRIM' },

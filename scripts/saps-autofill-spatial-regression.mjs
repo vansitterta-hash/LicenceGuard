@@ -25,6 +25,7 @@ const applicationTypeFor = (formCode) => ({
 }[formCode]);
 
 const dataFor = (formCode = 'SAPS_517') => ({
+  formFields: { identificationType: 'SA_ID', furtherCategories: 'HANDGUN', furtherHANDGUN: 'X', previousCategory: 'HANDGUN', previousNumber: 'CERT-1', previousIssueDate: '2020-01-02', previousExpiryDate: '2030-01-02', associationMember: 'NO', before90: 'YES', afterExpiry: 'NO', beforeExpiry: 'NO' },
   saps271Declarations: completeDeclarations(),
   generatedAt: '2026-09-19T10:00:00.000Z',
   canGenerate: true,
@@ -148,15 +149,7 @@ try {
     }
     assert.ok(layout.elements.find((item) => item.id.endsWith('application-reference'))?.autofillPolicy === 'PROTECTED_OFFICIAL');
     assert.ok(layout.elements.find((item) => item.id.endsWith('opened-date'))?.autofillPolicy === 'PROTECTED_OFFICIAL');
-    const province = layout.elements.find((item) => item.id.endsWith('province'));
-    const station = layout.elements.find((item) => item.id.endsWith('police-station'));
-    if (code === 'SAPS_517') {
-      assert.equal(province?.autofillPolicy, 'PROTECTED_OFFICIAL');
-      assert.equal(station?.autofillPolicy, 'PROTECTED_OFFICIAL');
-    } else {
-      assert.equal(province?.autofillPolicy, 'ROUTING');
-      assert.equal(station?.autofillPolicy, 'ROUTING');
-    }
+    assert.ok(!layout.elements.some(item => item.page === 1 && item.autofillPolicy === 'ROUTING'), 'Official-use routing remains blank');
   }
   assert.ok(!layouts.some((layout) => layout.elements.some((element) => /saps.?86|register-reference|date-received/i.test(element.id))));
 } finally {

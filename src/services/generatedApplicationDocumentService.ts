@@ -124,14 +124,14 @@ function documentTypeFor(data: ApplicationAutofillPackage): DocumentType {
   return 'COMPETENCY_APPLICATION';
 }
 
-function generatedDocumentPrivacy(userId: string) {
+export function generatedDocumentPrivacy(userId: string) {
   if (!userId?.trim()) throw new Error('Sign in before saving a generated application document.');
   // Callers pass the signed-in user's ID. uploaded_by is provenance, not the
   // ownership used by documents RLS (including INSERT ... RETURNING).
   return { owner_user_id: userId, record_scope: 'PRIVATE' as const };
 }
 
-async function registerGeneratedDocument(payload: Record<string, unknown> & {
+export async function registerGeneratedDocument(payload: Record<string, unknown> & {
   dealer_id: string;
   client_id: string;
   application_case_id: string;
@@ -224,6 +224,9 @@ export async function generateOfficialApplicationPdf(
   data: ApplicationAutofillPackage,
   values: ApplicationReviewValues
 ): Promise<Uint8Array> {
+  if (data.application.formCode !== 'SAPS_517' && (!data.canGenerate || mapApplicationToSapsTemplate(data, values).missingRequiredFieldCount)) {
+    throw new Error('Complete and save the required applicant information before generating the official form.');
+  }
   if (data.application.formCode === 'SAPS_517') {
     const address = saps517Address({ address_line_1: values.residentialAddress, suburb: values.suburb, city: values.city, province: values.province });
     data = { ...data, saps517Applicant: saps517ApplicantFields({

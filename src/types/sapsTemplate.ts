@@ -3,6 +3,7 @@ import type { ApplicationCaseType } from './applicationCase';
 import type { DocumentType } from './document';
 
 export type SapsTemplateFieldKey =
+  | `application.form.${string}`
   | `applicant.saps517.${string}`
   | `applicant.declarations.${string}`
   | 'application.section12'

@@ -26,6 +26,7 @@ import Button from '../components/Button';
 import Card from '../components/Card';
 import Screen from '../components/Screen';
 import TextField from '../components/TextField';
+import ApplicationFormQuestions from '../components/client/ApplicationFormQuestions';
 import { useAuth } from '../context/AuthContext';
 import { listClientCompetencies } from '../engines/competencyEngine';
 import {
@@ -149,6 +150,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   const { dealerProfile, user } = useAuth();
   const [data, setData] = useState<FormData | null>(null);
   const [values, setValues] = useState<ApplicationCaseFormValues>(EMPTY_FORM);
+  const formAnswersSaveRef = useRef<(() => Promise<void>) | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -269,8 +271,8 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
   );
 
   const selectedCompetency = useMemo(
-    () => data?.competencies.find((item) => item.id === values.competencyId) ?? null,
-    [data?.competencies, values.competencyId]
+    () => data?.competencies.find((item) => item.id === values.competencyId) ?? (values.applicationType === 'COMPETENCY_RENEWAL' && data?.competencies.filter(item => item.category === values.competencyCategory).length === 1 ? data.competencies.find(item => item.category === values.competencyCategory) : null) ?? null,
+    [data?.competencies, values.competencyId, values.competencyCategory, values.applicationType]
   );
 
   const canContinue = competencyApplication
@@ -320,7 +322,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
     setValues((current) => ({
       ...current,
       competencyId: competency.id,
-      competencyCategory: competency.category,
+      competencyCategory: current.applicationType === 'COMPETENCY_ADDITIONAL_CATEGORY' ? current.competencyCategory : competency.category,
     }));
   };
 
@@ -393,6 +395,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         ? await updateApplicationCase(route.params.applicationCaseId, dealerProfile.dealerId, route.params.clientId, user.id, values)
         : await createApplicationCase(dealerProfile.dealerId, route.params.clientId, user.id, values);
 
+      await formAnswersSaveRef.current?.();
       lastPersistedValuesRef.current = JSON.stringify(values);
       setDirty(false);
       setSaveError(null);
@@ -448,6 +451,16 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         </View>
       </Card>
 
+      {route.params.applicationCaseId && values.applicationType !== 'COMPETENCY_FIRST_APPLICATION' && values.applicationType !== 'COMPETENCY_REAPPLICATION' ? <ApplicationFormQuestions
+          saveRef={formAnswersSaveRef}
+        key={route.params.applicationCaseId}
+        application={{ id: route.params.applicationCaseId, application_type: values.applicationType, competency_category: values.competencyCategory, competency_id: values.competencyId, licence_section: values.licenceSection, actual_submission_date: values.actualSubmissionDate, target_submission_date: values.targetSubmissionDate }}
+        profile={data.client.saps271_declarations} idNumber={data.client.id_number}
+        competencies={data.competencies} competency={selectedCompetency} licence={selectedFirearm?.licence}
+        dealerId={dealerProfile?.dealerId ?? ''} clientId={data.client.id} userId={user?.id ?? ''}
+        onSaved={profile => setData(current => current ? { ...current, client: { ...current.client, saps271_declarations: profile } } : current)}
+      /> : null}
+
       {firearmApplication ? (
         <Card title="Which firearm?" subtitle="Select an existing firearm, or add it now without losing this application.">
           <View style={styles.optionList}>
@@ -472,7 +485,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         </Card>
       ) : null}
 
-      {competencyApplication ? (
+      {competencyApplication && values.applicationType !== 'COMPETENCY_ADDITIONAL_CATEGORY' ? (
         <Card title="Which competency?" subtitle={values.applicationType === 'COMPETENCY_RENEWAL' ? 'Select the existing competency being renewed.' : 'Choose the category required.'}>
           {values.applicationType === 'COMPETENCY_RENEWAL' ? (
             <View style={styles.optionList}>
@@ -519,6 +532,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
               <View style={styles.choiceRow}>
                 <Choice label="Dealer" icon={<Building2 color={values.acquisitionSource === 'DEALER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'DEALER'} onPress={() => setField('acquisitionSource', 'DEALER')} />
                 <Choice label="Private sale" icon={<UserRound color={values.acquisitionSource === 'PRIVATE_SELLER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'PRIVATE_SELLER'} onPress={() => setField('acquisitionSource', 'PRIVATE_SELLER')} />
+                <Choice label="Already owned / existing firearm" icon={<Target color={Colors.silver} size={17} />} selected={values.acquisitionSource === 'EXISTING_FIREARM'} onPress={() => setField('acquisitionSource', 'EXISTING_FIREARM')} />
               </View>
             </>
           ) : null}
@@ -566,7 +580,7 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
             multiline
           />
 
-          {newFirearmApplication ? (
+          {newFirearmApplication && ['DEALER', 'PRIVATE_SELLER'].includes(values.acquisitionSource) ? (
             <>
               <TextField label={values.acquisitionSource === 'PRIVATE_SELLER' ? 'Seller name' : 'Dealer name'} value={values.supplierName} onChangeText={(value) => setField('supplierName', value)} placeholder="Optional if already contained in the uploaded sale document" />
               <TextField label="ID or registration number" value={values.supplierIdOrRegistration} onChangeText={(value) => setField('supplierIdOrRegistration', value)} />

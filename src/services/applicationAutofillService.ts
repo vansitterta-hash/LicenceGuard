@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import { declarationDataIssues, declarationReadinessIssues, saps271DeclarationFields } from '../utils/saps271Declarations';
 import { saps517ApplicantFields, saps517RequiredProfileIssues, saps517Address } from '../utils/saps517Applicant';
 import { resolveReusableCompetency } from '../utils/reusableCompetency';
+import { evaluateApplicationForm } from '../utils/applicationFormAnswers';
 import { getAutofillFormCode } from '../utils/applicationBetaPolicy';
 import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import {
@@ -168,6 +169,8 @@ export async function buildApplicationAutofillPackage(
     issues.push({ key: 'competencyRecord', label: 'Linked competency record', message: 'The linked competency is unavailable for this client or does not match the application category. Review the application link.', severity: 'BLOCKING' });
   }
   const code = getAutofillFormCode(applicationCase.application_type);
+  const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies: competencyResult.data ?? [], competency, licence });
+  if (code !== 'SAPS_517') for (const [index, message] of form.issues.entries()) issues.push({ key: `applicationForm.${index}`, label: 'Application form answers', message, severity: 'BLOCKING' });
   const usesBackgroundQuestionnaire = ['SAPS_271', 'SAPS_517', 'SAPS_517_A'].includes(code);
   const usesSaps517ApplicantData = code === 'SAPS_517';
   if (code === 'SAPS_271') {
@@ -186,8 +189,9 @@ export async function buildApplicationAutofillPackage(
   }
 
   return {
+    ...(code !== 'SAPS_517' ? { formFields: form.fields } : {}),
     ...(usesBackgroundQuestionnaire ? { saps271Declarations: client.saps271_declarations ?? null, saps271DeclarationFields: saps271DeclarationFields(client.saps271_declarations) } : {}),
-    ...(usesSaps517ApplicantData ? { saps517Applicant: saps517ApplicantFields({
+    ...(['SAPS_517', 'SAPS_517_A'].includes(code) ? { saps517Applicant: saps517ApplicantFields({
       profile: client.saps271_declarations,
       idNumber: client.id_number,
       competencyCategory: competencyCategory ?? competency?.category ?? null,
@@ -231,7 +235,7 @@ export async function buildApplicationAutofillPackage(
           expiryDate: text(competency?.expiry_date),
         }
       : null,
-    supplier: applicationCase.acquisition_source !== 'NOT_APPLICABLE'
+    supplier: ['DEALER', 'PRIVATE_SELLER'].includes(applicationCase.acquisition_source)
       ? {
           acquisitionSource: applicationCase.acquisition_source,
           name: text(applicationCase.supplier_name),

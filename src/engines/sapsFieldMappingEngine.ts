@@ -10,6 +10,7 @@ function sectionFlag(section: string, expected: string): string {
 }
 
 function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, values: ApplicationReviewValues): string {
+  if (key.startsWith('application.form.')) return data.formFields?.[key.slice('application.form.'.length)] ?? '';
   if (key.startsWith('applicant.saps517.')) {
     return resolveDocumentField(key, { data, reviewValues: values as unknown as Record<string, string> });
   }
@@ -65,7 +66,16 @@ function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, v
 
 export function mapApplicationToSapsTemplate(data: ApplicationAutofillPackage, values: ApplicationReviewValues): SapsMappedDocument {
   const template = getSapsTemplate(data.application.formCode);
-  const mapped = template.fields.map((field) => ({ ...field, value: valueFor(field.key, data, values).trim() }));
+  const mapped = template.fields.map((field) => {
+    let required = field.required;
+    if (field.key.startsWith('supplier.') && !data.supplier) required = false;
+    const key = field.key.replace('application.form.', '');
+    if (['associationName', 'associationNumber', 'associationJoined'].includes(key)) required = data.formFields?.associationMember === 'YES';
+    if (key === 'before90Reason') required = data.formFields?.before90 === 'NO';
+    if (key === 'beforeExpiryReason') required = data.formFields?.beforeExpiry === 'YES';
+    if (key === 'afterExpiryReason') required = data.formFields?.afterExpiry === 'YES';
+    return { ...field, required, value: valueFor(field.key, data, values).trim() };
+  });
   const sectionNames = Array.from(new Set(mapped.map((field) => field.section)));
   const sections = sectionNames.map((title) => ({ title, fields: mapped.filter((field) => field.section === title) }));
   return {
