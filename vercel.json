@@ -1,6 +1,11 @@
 {
   "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
+  "functions": {
+    "api/saps-template.js": {
+      "includeFiles": "public/saps-templates/SAPS_271_EN_OFFICIAL.pdf"
+    }
+  },
   "routes": [
     {
       "handle": "filesystem"
