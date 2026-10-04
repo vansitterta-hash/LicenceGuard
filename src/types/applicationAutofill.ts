@@ -2,6 +2,7 @@ import type { ApplicationCaseType } from './applicationCase';
 import type { CompetencyCategory } from './competency';
 import type { FirearmType } from './firearm';
 import type { Saps271Declarations } from './saps271Declarations';
+import type { Saps517AdditionalDeclarationKey } from './saps271Declarations';
 
 export type AutofillFormCode =
   | 'SAPS_271'
@@ -33,6 +34,41 @@ export type AutofillApplicantData = {
   city: string;
   province: string;
   postalCode: string;
+};
+
+export type AutofillSaps517ApplicantData = {
+  citizenship: string;
+  dateOfBirth: string;
+  age: string;
+  gender: string;
+  maritalStatus: string;
+  otherMaritalStatus: string;
+  spouseIdType: string;
+  spouseIdNumber: string;
+  spousePassport: string;
+  residentialLocality: string;
+  postalLocality: string;
+  residentialAddress: string;
+  postalAddress: string;
+  postalAddressPostalCode: string;
+  residenceDescription: string;
+  occupation: string;
+  selfEmploymentDetails: string;
+  employerName: string;
+  businessAddress: string;
+  businessPostalCode: string;
+  workTelephone: string;
+  faxNumber: string;
+  knowledgeOfActTest: string;
+  safeHandlingTrainingTest: string;
+  trainingCertificate: string;
+  trainingInstitution: string;
+  trainingCertificateSerial: string;
+  trainingCertificateIssueDate: string;
+  trainingCategory: { pistol: string; revolver: string; rifle: string; shotgun: string; other: string };
+  declarations: Record<Saps517AdditionalDeclarationKey, { answer: string; details: string }>;
+  under21Reason: string;
+  under21OtherDetails: string;
 };
 
 export type AutofillFirearmData = {
@@ -79,6 +115,7 @@ export type AutofillApplicationData = {
 export type ApplicationAutofillPackage = {
   saps271Declarations?: Saps271Declarations | null;
   saps271DeclarationFields?: Record<string, string>;
+  saps517Applicant?: AutofillSaps517ApplicantData;
   generatedAt: string;
   applicant: AutofillApplicantData;
   firearm: AutofillFirearmData | null;

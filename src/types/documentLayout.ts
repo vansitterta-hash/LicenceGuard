@@ -25,10 +25,11 @@ export type DocumentLayoutElement = {
   disableAutofill?: boolean;
   boxCount?: number;
   boxWidth?: number;
+  boxWidths?: number[];
   boxSpacing?: number;
   separatorAfter?: number[];
   separatorWidth?: number;
-  characterSet?: 'DIGITS' | 'ALPHANUMERIC';
+  characterSet?: 'DIGITS' | 'ALPHANUMERIC' | 'TEXT';
   allowLetters?: boolean;
   renderAs?: 'TEXT' | 'CHARACTER_BOXES';
   choiceValue?: string;

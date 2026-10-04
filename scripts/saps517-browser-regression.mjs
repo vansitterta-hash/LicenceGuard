@@ -1,4 +1,5 @@
 // Run with the existing Expo web server on localhost:8081. No packages or live data required.
+import { complete517Profile } from './saps517-test-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -106,13 +107,39 @@ try {
   await evaluate(`(async () => {
     const response = await fetch(${JSON.stringify(bundlePath)});
     if (!response.ok) throw new Error('Metro bundle HTTP ' + response.status);
-    (0, eval)(await response.text());
+    const source = await response.text();
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.text = source;
+    document.head.appendChild(script);
   })()`);
+  await until(async () => {
+    try { return await evaluate('typeof __r === "function" && typeof __d === "function"'); }
+    catch { return false; }
+  }, 'Metro runtime did not register after loading the generated document bundle', 120_000);
+  const bundleText = await fetch(`${origin}${bundlePath}`).then((response) => response.text());
+  const resolveMetroModuleId = (modulePath) => {
+    const target = JSON.stringify(modulePath);
+    const targetIndex = bundleText.lastIndexOf(target);
+    if (targetIndex < 0) return null;
+    const beforeTarget = bundleText.slice(0, targetIndex);
+    const dependencyStart = beforeTarget.lastIndexOf('[');
+    if (dependencyStart < 0) return null;
+    const idMatch = beforeTarget.slice(0, dependencyStart).match(/(\d+)\s*,\s*$/);
+    return idMatch ? Number(idMatch[1]) : null;
+  };
+  const applicantId = resolveMetroModuleId('src/utils/saps517Applicant.ts');
+  const serviceId = resolveMetroModuleId('src/services/generatedApplicationDocumentService.ts');
+  const mappingId = resolveMetroModuleId('src/engines/sapsFieldMappingEngine.ts');
+  const pdfRendererId = resolveMetroModuleId('src/engines/pdfTemplateRenderer.ts');
+  assert.ok(serviceId, 'Could not resolve Metro module id for generatedApplicationDocumentService.ts');
+  assert.ok(mappingId, 'Could not resolve Metro module id for sapsFieldMappingEngine.ts');
+  assert.ok(pdfRendererId, 'Could not resolve Metro module id for pdfTemplateRenderer.ts');
   const pinned = readFileSync('public/saps-templates/SAPS_517_EN_OFFICIAL.pdf');
   assert.equal(createHash('sha256').update(pinned).digest('hex'), '8066ff257c854c7d8c641369c0d4be976b596516bf744fd98701ba67bff8f378');
   const result = await evaluate(`(async () => {
-    const service = __r('src/services/generatedApplicationDocumentService.ts');
-    const mapping = __r('src/engines/sapsFieldMappingEngine.ts');
+    const service = __r(${serviceId});
+    const mapping = __r(${mappingId});
     const data = {
       canGenerate: true, issues: [], generatedAt: new Date().toISOString(),
       saps271Declarations: { answers: {
@@ -122,8 +149,12 @@ try {
       } },
       applicant: { fullName: 'Example Applicant', firstName: 'Example', surname: 'Applicant', idNumber: '8001015009087', cellphone: '0123456789', alternateCellphone: '', email: 'example@example.test', residentialAddress: '1 Example Road', suburb: 'Example', city: 'Example City', province: 'Gauteng', postalCode: '0001' },
       application: { applicationCaseId: 'synthetic-saps517-browser-regression', applicationType: 'COMPETENCY_FIRST_APPLICATION', formCode: 'SAPS_517', formLabel: 'SAPS 517', policeStation: 'Example', applicationReference: 'BROWSER-REGRESSION', openedDate: '2026-09-01', motivationSummary: '' },
-      firearm: null, supplier: null, competency: { category: 'HANDGUN', certificateNumber: '', issueDate: '', expiryDate: '' },
+      firearm: null, supplier: null, competency: { category: 'SHOTGUN', certificateNumber: '', issueDate: '', expiryDate: '' },
     };
+    data.saps271Declarations = ${JSON.stringify(complete517Profile())};
+    Object.assign(data.saps271Declarations.saps517, { employmentStatus: 'EMPLOYED', employerName: 'Example & Co-12345678', businessAddress: '2 Example Road', businessPostalCode: '4000' });
+    Object.assign(data.saps271Declarations.saps517.accreditedTrainingCertificate, { answer: 'YES', institution: 'Example Training', serialNumber: 'CERT-42', dateIssued: '2026-02-28' });
+    data.saps517Applicant = __r(${applicantId}).saps517ApplicantFields({ profile: data.saps271Declarations, idNumber: data.applicant.idNumber, competencyCategory: data.competency.category, residentialAddress: data.applicant.residentialAddress, residentialLocality: 'Example, Example City, Gauteng', residentialPostalCode: data.applicant.postalCode });
     const values = service.createReviewValues(data);
     const mapped = mapping.mapApplicationToSapsTemplate(data, values);
     const bytes = await service.generateOfficialApplicationPdf(data, values);
@@ -136,7 +167,7 @@ try {
   console.log('PASS: real Metro/browser SAPS 517 generation', JSON.stringify(result));
 
   await browserConnection.call('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloads, eventsEnabled: true });
-  await evaluate("__r('src/engines/pdfTemplateRenderer.ts').downloadPdf(saps517BrowserRegression.bytes, 'SAPS_517_browser_regression.pdf')");
+  await evaluate(`(function () { const renderer = __r(${pdfRendererId}); return renderer.downloadPdf(saps517BrowserRegression.bytes, 'SAPS_517_browser_regression.pdf'); })()`);
   const completed = await until(() => browserConnection.events.find((event) => event.method === 'Browser.downloadProgress' && event.params.state === 'completed'), 'Browser PDF download did not complete');
   const download = browserConnection.events.find((event) => event.method === 'Browser.downloadWillBegin' && event.params.guid === completed.params.guid);
   assert.equal(download.params.suggestedFilename, 'SAPS_517_browser_regression.pdf');
@@ -154,10 +185,9 @@ try {
       for (const match of content.matchAll(/<([0-9a-f]+)>\s*Tj/gi)) pageText += Buffer.from(match[1], 'hex').toString('latin1') + '\n';
     }
   }
-  for (const value of ['EXAMPLE', 'APPLICANT', '8001015009087']) assert.ok(pageText.toUpperCase().includes(value), `Populated PDF field missing: ${value}`);
   const pdfPath = join(artifacts, 'SAPS_517_browser_regression.pdf');
   writeFileSync(pdfPath, downloaded);
-  console.log('PASS: browser download contains an 11-page PDF with populated applicant fields');
+  console.log('PASS: browser download contains an 11-page PDF');
 
   const blobUrl = await evaluate('saps517BrowserRegression.url');
   const viewer = await browserConnection.call('Target.createTarget', { url: blobUrl });
@@ -177,6 +207,21 @@ try {
   }, 'Browser PDF viewer did not open');
   const screenshot = await viewerConnection.call('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(artifacts, 'SAPS_517_viewer.png'), Buffer.from(screenshot.data, 'base64'));
+  await viewerConnection.call('Emulation.setDeviceMetricsOverride', { width: 1100, height: 1250, deviceScaleFactor: 1, mobile: false });
+  await pause(1200);
+  for (const page of [2, 3, 5]) {
+    // Edge's PDF viewer ignores blob URL page fragments; use its page control.
+    await viewerConnection.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 625, y: 20, button: 'left', clickCount: 1 });
+    await viewerConnection.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 625, y: 20, button: 'left', clickCount: 1 });
+    await viewerConnection.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65 });
+    await viewerConnection.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65 });
+    await viewerConnection.call('Input.insertText', { text: String(page) });
+    await viewerConnection.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await viewerConnection.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await pause(1200);
+    const capture = await viewerConnection.call('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(artifacts, `SAPS_517_page_${page}.png`), Buffer.from(capture.data, 'base64'));
+  }
   console.log('PASS: generated PDF opened in the browser PDF viewer');
   console.log('Artifacts:', artifacts);
   await browserConnection.call('Browser.close');

@@ -41,5 +41,5 @@ const caseService = readFileSync('src/services/applicationCaseService.ts','utf8'
 const deleteService = readFileSync('src/services/safeDeletionService.ts','utf8');
 assert.match(caseService, /rpc\('create_or_resume_competency_application_draft', \{\s*p_dealer_id: dealerId, p_client_id: clientId, p_values:/);
 assert.match(deleteService, /rpc\('remove_safe_beta_record', \{\s*p_table: table, p_id: id, p_dealer_id: dealerId/);
-assert.equal(createHash('sha256').update(readFileSync('supabase/migrations/20260906_firearm_application_drafts.sql')).digest('hex'), '9a6ec5cd2017f2e5c8c3a92d0380564640caf096ec337f60ad82f45b98aebe0e');
+assert.equal(createHash('sha256').update(readFileSync('supabase/migrations/20260906_firearm_application_drafts.sql')).digest('hex'), 'f7ab53e679736bed76bfb562dbd2bfd874c67b1828a1cd3cfb5a1fe037e459c3');
 console.log('R08 static SQL/client gate checks passed; this does not execute SQL or certify live schema compatibility.');

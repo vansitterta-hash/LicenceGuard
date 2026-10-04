@@ -1,8 +1,50 @@
 import type { DocumentFieldDefinition, DocumentFieldId } from '../types/documentEngine';
 import { SAPS271_DECLARATION_FIELDS } from './saps271DeclarationMapping';
+import { SAPS517_ADDITIONAL_DECLARATIONS } from '../utils/saps517Applicant';
+
+const SAPS517_APPLICANT_FIELDS: DocumentFieldDefinition[] = [
+  ...['spouseIdType', 'spouseIdNumber', 'spousePassport'].map((key) => ({ id: `applicant.saps517.${key}` as DocumentFieldId, label: key, dataType: 'TEXT' as const, sourcePath: `data.saps517Applicant.${key}`, normalise: 'TRIM' as const })),
+  { id: 'applicant.saps517.citizenship', label: 'Citizenship', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.citizenship', normalise: 'TRIM' },
+  { id: 'applicant.saps517.dateOfBirth', label: 'Date of birth', dataType: 'DATE', sourcePath: 'data.saps517Applicant.dateOfBirth', normalise: 'TRIM' },
+  { id: 'applicant.saps517.age', label: 'Age', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.age', normalise: 'DIGITS_ONLY' },
+  { id: 'applicant.saps517.gender', label: 'Gender', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.gender', normalise: 'TRIM' },
+  { id: 'applicant.saps517.otherMaritalStatus', label: 'Other marital status', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.otherMaritalStatus', normalise: 'TRIM' },
+  { id: 'applicant.saps517.residentialLocality', label: 'Residential locality', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.residentialLocality', normalise: 'TRIM' },
+  { id: 'applicant.saps517.postalLocality', label: 'Postal locality', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.postalLocality', normalise: 'TRIM' },
+  { id: 'applicant.saps517.maritalStatus', label: 'Marital status', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.maritalStatus', normalise: 'TRIM' },
+  { id: 'applicant.saps517.residentialAddress', label: 'Residential address', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.residentialAddress', normalise: 'TRIM' },
+  { id: 'applicant.saps517.postalAddress', label: 'Postal address', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.postalAddress', normalise: 'TRIM' },
+  { id: 'applicant.saps517.postalAddressPostalCode', label: 'Postal address code', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.postalAddressPostalCode', normalise: 'DIGITS_ONLY' },
+  { id: 'applicant.saps517.residenceDescription', label: 'Residence description', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.residenceDescription', normalise: 'TRIM' },
+  { id: 'applicant.saps517.occupation', label: 'Trade or profession', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.occupation', normalise: 'TRIM' },
+  { id: 'applicant.saps517.selfEmploymentDetails', label: 'Self-employment details', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.selfEmploymentDetails', normalise: 'TRIM' },
+  { id: 'applicant.saps517.employerName', label: 'Employer or company', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.employerName', normalise: 'TRIM' },
+  { id: 'applicant.saps517.businessAddress', label: 'Business address', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.businessAddress', normalise: 'TRIM' },
+  { id: 'applicant.saps517.businessPostalCode', label: 'Business postal code', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.businessPostalCode', normalise: 'DIGITS_ONLY' },
+  { id: 'applicant.saps517.workTelephone', label: 'Work telephone', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.workTelephone', normalise: 'TRIM' },
+  { id: 'applicant.saps517.faxNumber', label: 'Fax number', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.faxNumber', normalise: 'TRIM' },
+  { id: 'applicant.saps517.knowledgeOfActTest', label: 'Knowledge of Act test answer', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.knowledgeOfActTest', normalise: 'TRIM' },
+  { id: 'applicant.saps517.safeHandlingTrainingTest', label: 'Safe-handling training answer', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.safeHandlingTrainingTest', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCertificate', label: 'Accredited training certificate answer', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.trainingCertificate', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingInstitution', label: 'Training institution', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingInstitution', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCertificateSerial', label: 'Training certificate serial', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCertificateSerial', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCertificateIssueDate', label: 'Training certificate issue date', dataType: 'DATE', sourcePath: 'data.saps517Applicant.trainingCertificateIssueDate', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCategory.pistol', label: 'Training category pistol', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCategory.pistol', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCategory.revolver', label: 'Training category revolver', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCategory.revolver', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCategory.rifle', label: 'Training category rifle', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCategory.rifle', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCategory.shotgun', label: 'Training category shotgun', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCategory.shotgun', normalise: 'TRIM' },
+  { id: 'applicant.saps517.trainingCategory.other', label: 'Training category other', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.trainingCategory.other', normalise: 'TRIM' },
+  { id: 'applicant.saps517.under21Reason', label: 'Under-21 compelling reason', dataType: 'CHOICE', sourcePath: 'data.saps517Applicant.under21Reason', normalise: 'TRIM' },
+  { id: 'applicant.saps517.under21OtherDetails', label: 'Under-21 other reason details', dataType: 'TEXT', sourcePath: 'data.saps517Applicant.under21OtherDetails', normalise: 'TRIM' },
+  ...SAPS517_ADDITIONAL_DECLARATIONS.flatMap((question) => [
+    { id: `applicant.saps517.declarations.${question.key}.answer` as DocumentFieldId, label: `SAPS 517 H${question.number} answer`, dataType: 'CHOICE' as const, sourcePath: `data.saps517Applicant.declarations.${question.key}.answer`, normalise: 'TRIM' as const },
+    { id: `applicant.saps517.declarations.${question.key}.details` as DocumentFieldId, label: `SAPS 517 H${question.number} details`, dataType: 'TEXT' as const, sourcePath: `data.saps517Applicant.declarations.${question.key}.details`, normalise: 'TRIM' as const },
+  ]),
+];
 
 const FIELDS: DocumentFieldDefinition[] = [
   ...SAPS271_DECLARATION_FIELDS,
+  ...SAPS517_APPLICANT_FIELDS,
   { id: 'application.type', label: 'Application type', dataType: 'CHOICE', sourcePath: 'data.application.applicationType', normalise: 'TRIM' },
   { id: 'application.section', label: 'Licence section', dataType: 'TEXT', sourcePath: 'review.licenceSection', normalise: 'SECTION_NUMBER' },
   { id: 'application.policeStation', label: 'Police station / DFO', dataType: 'TEXT', sourcePath: 'review.policeStation', normalise: 'TRIM' },

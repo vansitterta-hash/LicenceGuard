@@ -1,3 +1,4 @@
+import { complete517Data, complete517Profile } from './saps517-test-fixture.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loader, hookHarness, nodes, nativeMock } from './beta-test-support.mjs';
@@ -17,6 +18,8 @@ const data = {
   firearm: null, supplier: null,
   competency: { category: 'HANDGUN', certificateNumber: '', issueDate: '', expiryDate: '' },
 };
+complete517Data(data);
+Object.assign(declarations, data.saps271Declarations);
 const values = createReviewValues(data);
 const { mapApplicationToSapsTemplate } = load('src/engines/sapsFieldMappingEngine.ts');
 assert.equal(mapApplicationToSapsTemplate(data, values).missingRequiredFieldCount, 0);
@@ -42,7 +45,7 @@ const currentCase = { id: 'current', client_id: 'client', application_type: 'COM
 const historicalCase = { ...currentCase, id: 'history', status: 'APPROVED' };
 const identity = { id: 'identity', client_id: 'client', application_case_id: 'old-firearm-case', document_type: 'ID_COPY', document_scope: 'APPLICATION_CASE', lifecycle_status: 'ACTIVE', is_verified: true, created_at: '2026-01-01', metadata: {}, expiry_date: null, storage_path: 'original-id.pdf' };
 const motivation = { ...identity, id: 'motivation', document_type: 'MOTIVATION', application_case_id: historicalCase.id, firearm_id: null, firearm_licence_id: null, storage_path: 'original-motivation.pdf' };
-const client = { id: 'client', first_name: 'Example', surname: 'Applicant', id_number: data.applicant.idNumber, address_line_1: '1 Example Road', city: 'Example City', province: 'Gauteng', cellphone: data.applicant.cellphone, saps271_declarations: declarations };
+const client = { id: 'client', first_name: 'Example', surname: 'Applicant', id_number: data.applicant.idNumber, postal_code: '0001', address_line_1: '1 Example Road', city: 'Example City', province: 'Gauteng', cellphone: data.applicant.cellphone, saps271_declarations: declarations };
 const rows = { clients: [client], application_cases: [currentCase, historicalCase], documents: [identity, motivation], competencies: [], firearms: [], firearm_licences: [] };
 const noWrite = () => { throw new Error('Unexpected write during acceptance regression'); };
 const db = { from(table) {
@@ -109,8 +112,9 @@ const uiMocks = {
 };
 const navigation = { addListener: () => () => {}, navigate: () => {} };
 const route = { params: { clientId: 'client', applicationCaseId: 'current' } };
-for (const mode of ['success', 'popup-blocked', 'render-error']) {
+for (const mode of ['success', 'popup-blocked', 'render-error', 'persistence-error']) {
   const harness = hookHarness(), alerts = [], downloads = [], timers = [];
+  let archiveCount = 0;
   let attached = false;
   const popup = { opener: {}, document: {}, location: {}, closed: false, close() { this.closed = true; } };
   globalThis.window = {
@@ -126,7 +130,16 @@ for (const mode of ['success', 'popup-blocked', 'render-error']) {
     '../services/applicationAutofillService': { buildApplicationAutofillPackage: async () => data },
     '../services/generatedApplicationDocumentService': {
       createReviewValues, generateOfficialApplicationPdf: async () => { if (mode === 'render-error') throw new Error('Template load failed'); return renderedBytes; },
-      archiveOfficialApplicationPdf: noWrite, archiveCompletedApplication: noWrite,
+      archiveOfficialApplicationPdf: async input => {
+        archiveCount++;
+        assert.equal(input.data.application.applicationCaseId, data.application.applicationCaseId);
+        assert.equal(input.clientId, 'client');
+        assert.equal(input.dealerId, 'dealer');
+        assert.equal(input.userId, 'user');
+        assert.equal(input.bytes, renderedBytes, 'save the exact generated PDF');
+        if (mode === 'persistence-error') throw new Error('Document registration failed');
+        return { id: 'generated-form' };
+      }, archiveCompletedApplication: noWrite,
     },
   });
   harness.mount(screenLoad('src/screens/ApplicationAutofillScreen.tsx').default, { navigation, route });
@@ -134,12 +147,16 @@ for (const mode of ['success', 'popup-blocked', 'render-error']) {
   const button = nodes(harness.tree).find((node) => node.props?.title === 'Generate official PDF');
   assert.equal(button.props.disabled, false);
   button.props.onPress();
+  button.props.onPress(); // Same-tick repeat must be ignored before React rerenders.
   await harness.settle();
-  if (mode === 'render-error') {
+  if (mode === 'render-error' || mode === 'persistence-error') {
+    const message = mode === 'render-error' ? 'Template load failed' : 'Document registration failed';
     assert.equal(downloads.length, 0);
     assert.equal(popup.closed, true);
-    assert.ok(alerts.some((args) => args[1] === 'Template load failed'));
-    assert.ok(nodes(harness.tree).some((node) => node.props?.accessibilityRole === 'alert' && node.props.children === 'Template load failed'));
+    assert.equal(archiveCount, mode === 'render-error' ? 0 : 1);
+    assert.ok(alerts.some((args) => args[1] === message));
+    assert.ok(nodes(harness.tree).some((node) => node.props?.accessibilityRole === 'alert' && node.props.children === message));
+    assert.ok(!nodes(harness.tree).some(node => node.props?.title === 'Official PDF ready'));
   } else {
     assert.equal(downloads.length, 1);
     assert.equal(downloads[0].name, 'SAPS_517_Applicant.pdf');
@@ -151,12 +168,16 @@ for (const mode of ['success', 'popup-blocked', 'render-error']) {
     if (mode === 'success') assert.match(popup.location.href, /^blob:/);
     assert.ok(timers.every((timer) => timer.ms >= 60_000));
     assert.equal(alerts.length, 0);
+    assert.equal(archiveCount, 1);
+    button.props.onPress();
+    await harness.settle();
+    assert.equal(archiveCount, 1, 'repeat delivery reuses the successfully registered generation');
   }
   harness.unmount();
   timers.forEach((timer) => timer.fn());
   delete globalThis.window;
 }
-console.log('PASS: Generate button delivers real PDF bytes, opens viewer, retains controls when popups are blocked, and visibly reports errors; no archive/write');
+console.log('PASS: Generate saves exact PDF before delivery; generation/persistence failures surface; same-tick and repeated handling register once; popup-blocked controls retained');
 
 for (const applicationType of ['COMPETENCY_FIRST_APPLICATION', 'COMPETENCY_ADDITIONAL_CATEGORY', 'COMPETENCY_RENEWAL', 'COMPETENCY_REAPPLICATION', 'FIREARM_LICENCE_FIRST_APPLICATION']) {
   const harness = hookHarness();

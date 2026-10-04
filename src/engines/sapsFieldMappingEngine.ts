@@ -1,4 +1,5 @@
 import { getSapsTemplate } from '../data/sapsTemplateRegistry';
+import { resolveDocumentField } from './documentEngine';
 import { saps271DeclarationFields } from '../utils/saps271Declarations';
 import type { ApplicationAutofillPackage } from '../types/applicationAutofill';
 import type { SapsMappedDocument, SapsTemplateFieldKey } from '../types/sapsTemplate';
@@ -9,6 +10,9 @@ function sectionFlag(section: string, expected: string): string {
 }
 
 function valueFor(key: SapsTemplateFieldKey, data: ApplicationAutofillPackage, values: ApplicationReviewValues): string {
+  if (key.startsWith('applicant.saps517.')) {
+    return resolveDocumentField(key, { data, reviewValues: values as unknown as Record<string, string> });
+  }
   if (key.startsWith('applicant.declarations.')) return saps271DeclarationFields(data.saps271Declarations)[key] ?? '';
   const section = values.licenceSection;
   switch (key) {

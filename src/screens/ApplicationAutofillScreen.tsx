@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
 import { userAlert as Alert } from '../utils/userAlert';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Archive, CheckCircle2, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
+import { CheckCircle2, Printer, RefreshCw, TriangleAlert } from 'lucide-react-native';
 
 import Button from '../components/Button';
 import Card from '../components/Card';
@@ -12,7 +12,6 @@ import { useAuth } from '../context/AuthContext';
 import { buildApplicationAutofillPackage } from '../services/applicationAutofillService';
 import { updateApplicationSupplierDetails } from '../services/applicationCaseService';
 import {
-  archiveCompletedApplication,
   archiveOfficialApplicationPdf,
   buildCompletedApplicationHtml,
   generateOfficialApplicationPdf,
@@ -37,8 +36,9 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   const [data, setData] = useState<ApplicationAutofillPackage | null>(null);
   const [values, setValues] = useState<ApplicationReviewValues | null>(null);
   const [loading, setLoading] = useState(true);
-  const [archiving, setArchiving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const generationInFlight = useRef(false);
+  const savedGeneration = useRef<{ key: string; bytes: Uint8Array } | null>(null);
   const [generatedPdf, setGeneratedPdf] = useState<{ bytes: Uint8Array; url: string; fileName: string } | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
@@ -82,7 +82,12 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   };
 
   const generatePdf = async () => {
-    if (!data || !values || !canFinalise || generatingPdf) return;
+    if (!data || !values || !canFinalise || generationInFlight.current) return;
+    if (!dealerProfile || !user) {
+      setPdfError('Sign in before generating and saving the official PDF.');
+      return;
+    }
+    generationInFlight.current = true;
     // Reserve the viewer during the user gesture, before asynchronous rendering.
     const preview = typeof window !== 'undefined' ? window.open('', '_blank') : null;
     if (preview) {
@@ -93,7 +98,20 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
     setPdfError(null);
     setGeneratedPdf(null);
     try {
-      const bytes = await generateOfficialApplicationPdf(data, values);
+      const key = JSON.stringify([route.params.clientId, data, values]);
+      const saved = savedGeneration.current?.key === key ? savedGeneration.current : null;
+      const bytes = saved?.bytes ?? await generateOfficialApplicationPdf(data, values);
+      if (!saved) {
+        await archiveOfficialApplicationPdf({
+          dealerId: dealerProfile.dealerId,
+          clientId: route.params.clientId,
+          userId: user.id,
+          data,
+          values,
+          bytes,
+        });
+        savedGeneration.current = { key, bytes };
+      }
       const fileName = `${data.application.formCode}_${values.surname || 'application'}.pdf`;
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
       setGeneratedPdf({ bytes, url, fileName });
@@ -105,26 +123,8 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
       setPdfError(message);
       Alert.alert('Unable to generate official PDF', message);
     } finally {
+      generationInFlight.current = false;
       setGeneratingPdf(false);
-    }
-  };
-
-  const archive = async () => {
-    if (!data || !values || !dealerProfile || !user) return;
-    setArchiving(true);
-    try {
-      await archiveOfficialApplicationPdf({
-        dealerId: dealerProfile.dealerId,
-        clientId: route.params.clientId,
-        userId: user.id,
-        data,
-        values,
-      });
-      Alert.alert('Official PDF archived', 'The completed official PDF has been saved against this application case. The blank SAPS template remains unchanged and reusable.');
-    } catch (error) {
-      Alert.alert('Unable to archive application', error instanceof Error ? error.message : 'An unknown error occurred.');
-    } finally {
-      setArchiving(false);
     }
   };
 
@@ -174,12 +174,11 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
           {data.canGenerate ? <CheckCircle2 color={Colors.success} size={34} /> : <TriangleAlert color={Colors.danger} size={34} />}
           <View style={styles.statusText}>
             <Text style={[styles.statusTitle, { color: data.canGenerate ? Colors.success : Colors.danger }]}>{data.canGenerate ? 'Review copy ready' : 'Auto-completion blocked'}</Text>
-            <Text style={styles.muted}>{data.canGenerate ? 'Review and correct the mapped fields below, then print and archive the completed copy.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
+            <Text style={styles.muted}>{data.canGenerate ? 'Review and correct the mapped fields below. Generate saves the official PDF against this application before opening it.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
           </View>
           <View style={styles.actions}>
             <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} loading={generatingPdf} onPress={() => void generatePdf()} title="Generate official PDF" />
             <Button disabled={!canFinalise} onPress={print} title="Print review sheet" variant="secondary" />
-            <Button disabled={!canFinalise || !dealerProfile || !user} leftIcon={<Archive color={Colors.silver} size={18} />} loading={archiving} onPress={() => void archive()} title="Archive official PDF" variant="secondary" />
           </View>
         </View>
       </Card>
@@ -188,10 +187,11 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
 
       {pdfError ? <Card title="Official PDF could not be delivered"><Text accessibilityRole="alert" style={{ color: Colors.danger }}>{pdfError}</Text></Card> : null}
       {generatedPdf ? <Card title="Official PDF ready" subtitle={generatedPdf.fileName}>
-        <Text style={styles.muted}>Your PDF is ready to view or download. It has not been archived.</Text>
+        <Text style={styles.muted}>Your PDF is saved against this application. Return to the application to review and verify it before compilation.</Text>
         <View style={styles.actions}>
           <Button title="Open generated PDF" onPress={() => void Linking.openURL(generatedPdf.url)} />
           <Button title="Download generated PDF" variant="secondary" onPress={() => downloadPdf(generatedPdf.bytes, generatedPdf.fileName)} />
+          <Button title="Return to application review" variant="secondary" onPress={() => navigation.goBack()} />
         </View>
       </Card> : null}
 

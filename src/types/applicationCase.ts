@@ -53,6 +53,9 @@ export type ApplicationCaseRecord = {
   supplier_contact: string | null;
   supplier_licence_number: string | null;
   sale_or_invoice_reference: string | null;
+  primary_purpose: string | null;
+  sport_discipline: string | null;
+  sport_association: string | null;
   motivation_summary: string | null;
 
   opened_date: string;
@@ -111,6 +114,9 @@ export type ApplicationCaseFormValues = {
   supplierContact: string;
   supplierLicenceNumber: string;
   saleOrInvoiceReference: string;
+  primaryPurpose: string;
+  sportDiscipline: string;
+  sportAssociation: string;
   motivationSummary: string;
 
   openedDate: string;

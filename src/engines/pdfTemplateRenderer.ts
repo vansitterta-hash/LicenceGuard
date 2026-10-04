@@ -169,8 +169,9 @@ export function getBoxCharacterPositions(element: DocumentLayoutElement): Array<
   const positions: Array<{ x: number; width: number }> = [];
   let x = element.x;
   for (let index = 0; index < element.boxCount; index++) {
-    positions.push({ x, width: boxWidth });
-    x += boxWidth;
+    const cellWidth = element.boxWidths?.[index] ?? boxWidth;
+    positions.push({ x, width: cellWidth });
+    x += cellWidth;
     if (separators.has(index + 1)) x += separatorWidth ?? boxWidth;
   }
   return positions;
@@ -181,7 +182,9 @@ function boxedCharacters(value: string, element: DocumentLayoutElement): string[
     ? value.replace(/\D/g, '')
     : element.characterSet === 'ALPHANUMERIC'
       ? value.replace(/[^a-z0-9]/gi, '')
-      : value.replace(/\s/g, '');
+      : element.characterSet === 'TEXT'
+        ? value
+        : value.replace(/\s/g, '');
   const characters = Array.from(normalised);
   if (characters.length > (element.boxCount ?? 0)) {
     throw new Error(`${element.fieldId} exceeds the ${element.boxCount} configured character boxes.`);
@@ -264,8 +267,8 @@ export async function renderOfficialPdfTemplate(input: {
     }
 
     const lines = splitText(value, font, size, element.width, element.maxLines ?? 1);
-    if (element.fieldId.startsWith('applicant.declarations.') && element.kind === 'TEXT' && lines.join(' ') !== value.trim().replace(/\s+/g, ' ')) {
-      throw new Error(`SAPS 271 declaration field ${element.fieldId} exceeds the available form space. Review the detail before generating; declaration text cannot be truncated.`);
+    if ((element.fieldId.startsWith('applicant.declarations.') || element.fieldId.startsWith('applicant.saps517.declarations.') || element.fieldId === 'applicant.saps517.under21OtherDetails') && element.kind === 'TEXT' && lines.join(' ') !== value.trim().replace(/\s+/g, ' ')) {
+      throw new Error(`${input.template.code} declaration field ${element.fieldId} exceeds the available form space. Review the detail before generating; declaration text cannot be truncated.`);
     }
     const lineHeight = element.lineHeight ?? size + 1;
 

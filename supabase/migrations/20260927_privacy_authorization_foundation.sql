@@ -1,20 +1,36 @@
-begin;
+﻿begin;
 
-create type if not exists public.workspace_kind as enum ('PRODUCTION', 'TEST');
-create type if not exists public.record_scope as enum ('PRIVATE', 'SHARED', 'TEST');
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'workspace_kind' and typnamespace = 'public'::regnamespace) then
+    create type public.workspace_kind as enum ('PRODUCTION', 'TEST');
+  end if;
+
+  if not exists (select 1 from pg_type where typname = 'record_scope' and typnamespace = 'public'::regnamespace) then
+    create type public.record_scope as enum ('PRIVATE', 'SHARED', 'TEST');
+  end if;
+end $$;
 
 -- Preserve the existing role model while adding an explicit tester role.
 do $$
 begin
   if exists (
-    select 1 from pg_type where typname = 'dealer_user_role'
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where t.typname = 'dealer_user_role'
+      and n.nspname = 'public'
   ) then
     if not exists (
       select 1
-      from unnest(enum_range(null::public.dealer_user_role)) as value(role)
-      where role = 'tester'
+      from pg_enum e
+      join pg_type t on t.oid = e.enumtypid
+      join pg_namespace n on n.oid = t.typnamespace
+      where t.typname = 'dealer_user_role'
+        and n.nspname = 'public'
+        and e.enumlabel = 'tester'
     ) then
-      alter type public.dealer_user_role add value if not exists 'tester';
+      alter type public.dealer_user_role add value 'tester';
     end if;
   end if;
 end $$;
@@ -22,9 +38,19 @@ end $$;
 alter table public.dealers
   add column if not exists workspace_kind public.workspace_kind not null default 'PRODUCTION';
 
-alter table public.dealers
-  add constraint if not exists dealers_workspace_kind_check
-  check (workspace_kind in ('PRODUCTION', 'TEST'));
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'dealers_workspace_kind_check'
+      and conrelid = 'public.dealers'::regclass
+  ) then
+    alter table public.dealers
+      add constraint dealers_workspace_kind_check
+      check (workspace_kind in ('PRODUCTION', 'TEST'));
+  end if;
+end $$;
 
 create table if not exists public.dealer_user_permissions (
   id uuid primary key default gen_random_uuid(),
@@ -209,6 +235,30 @@ alter table public.documents
 alter table public.documents
   add column if not exists record_scope public.record_scope not null default 'PRIVATE';
 
+alter table public.application_checklist_items
+  add column if not exists owner_user_id uuid references auth.users(id);
+
+alter table public.application_checklist_items
+  add column if not exists record_scope public.record_scope not null default 'PRIVATE';
+
+alter table public.application_pack_items
+  add column if not exists owner_user_id uuid references auth.users(id);
+
+alter table public.application_pack_items
+  add column if not exists record_scope public.record_scope not null default 'PRIVATE';
+
+alter table public.notification_log
+  add column if not exists owner_user_id uuid references auth.users(id);
+
+alter table public.notification_log
+  add column if not exists record_scope public.record_scope not null default 'PRIVATE';
+
+alter table public.audit_log
+  add column if not exists owner_user_id uuid references auth.users(id);
+
+alter table public.audit_log
+  add column if not exists record_scope public.record_scope not null default 'PRIVATE';
+
 create trigger clients_assert_record_privacy_fields
 before insert or update on public.clients
 for each row execute function public.assert_record_privacy_fields();
@@ -233,47 +283,46 @@ create trigger documents_assert_record_privacy_fields
 before insert or update on public.documents
 for each row execute function public.assert_record_privacy_fields();
 
+create trigger application_checklist_items_assert_record_privacy_fields
+before insert or update on public.application_checklist_items
+for each row execute function public.assert_record_privacy_fields();
+
+create trigger application_pack_items_assert_record_privacy_fields
+before insert or update on public.application_pack_items
+for each row execute function public.assert_record_privacy_fields();
+
+create trigger notification_log_assert_record_privacy_fields
+before insert or update on public.notification_log
+for each row execute function public.assert_record_privacy_fields();
+
+create trigger audit_log_assert_record_privacy_fields
+before insert or update on public.audit_log
+for each row execute function public.assert_record_privacy_fields();
+
 create trigger dealer_user_permissions_validate
 before insert or update on public.dealer_user_permissions
 for each row execute function public.validate_dealer_user_permission();
 
-create index if not exists clients_owner_user_id_idx
-  on public.clients(owner_user_id);
+create index if not exists clients_owner_user_id_idx on public.clients(owner_user_id);
+create index if not exists competencies_owner_user_id_idx on public.competencies(owner_user_id);
+create index if not exists firearms_owner_user_id_idx on public.firearms(owner_user_id);
+create index if not exists firearm_licences_owner_user_id_idx on public.firearm_licences(owner_user_id);
+create index if not exists application_cases_owner_user_id_idx on public.application_cases(owner_user_id);
+create index if not exists documents_owner_user_id_idx on public.documents(owner_user_id);
+create index if not exists application_checklist_items_owner_user_id_idx on public.application_checklist_items(owner_user_id);
+create index if not exists application_pack_items_owner_user_id_idx on public.application_pack_items(owner_user_id);
+create index if not exists notification_log_owner_user_id_idx on public.notification_log(owner_user_id);
+create index if not exists audit_log_owner_user_id_idx on public.audit_log(owner_user_id);
 
-create index if not exists competencies_owner_user_id_idx
-  on public.competencies(owner_user_id);
-
-create index if not exists firearms_owner_user_id_idx
-  on public.firearms(owner_user_id);
-
-create index if not exists firearm_licences_owner_user_id_idx
-  on public.firearm_licences(owner_user_id);
-
-create index if not exists application_cases_owner_user_id_idx
-  on public.application_cases(owner_user_id);
-
-create index if not exists documents_owner_user_id_idx
-  on public.documents(owner_user_id);
-
-create index if not exists clients_record_scope_idx
-  on public.clients(dealer_id, record_scope);
-
-create index if not exists competencies_record_scope_idx
-  on public.competencies(dealer_id, record_scope);
-
-create index if not exists firearms_record_scope_idx
-  on public.firearms(dealer_id, record_scope);
-
-create index if not exists firearm_licences_record_scope_idx
-  on public.firearm_licences(dealer_id, record_scope);
-
-create index if not exists application_cases_record_scope_idx
-  on public.application_cases(dealer_id, record_scope);
-
-create index if not exists documents_record_scope_idx
-  on public.documents(dealer_id, record_scope);
-
--- Explicitly fail closed when ownership or permissions are absent.
--- Dealer membership remains necessary but no longer sufficient for private records.
+create index if not exists clients_record_scope_idx on public.clients(dealer_id, record_scope);
+create index if not exists competencies_record_scope_idx on public.competencies(dealer_id, record_scope);
+create index if not exists firearms_record_scope_idx on public.firearms(dealer_id, record_scope);
+create index if not exists firearm_licences_record_scope_idx on public.firearm_licences(dealer_id, record_scope);
+create index if not exists application_cases_record_scope_idx on public.application_cases(dealer_id, record_scope);
+create index if not exists documents_record_scope_idx on public.documents(dealer_id, record_scope);
+create index if not exists application_checklist_items_record_scope_idx on public.application_checklist_items(dealer_id, record_scope);
+create index if not exists application_pack_items_record_scope_idx on public.application_pack_items(dealer_id, record_scope);
+create index if not exists notification_log_record_scope_idx on public.notification_log(dealer_id, record_scope);
+create index if not exists audit_log_record_scope_idx on public.audit_log(dealer_id, record_scope);
 
 commit;

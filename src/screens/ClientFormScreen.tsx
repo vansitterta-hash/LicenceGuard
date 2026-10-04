@@ -35,6 +35,9 @@ import { Radius } from '../theme/radius';
 import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import Saps271DeclarationsSection from '../components/client/Saps271DeclarationsSection';
+import Saps517ApplicantSection from '../components/client/Saps517ApplicantSection';
+import { emptySaps271Declarations } from '../utils/saps271Declarations';
+import { deriveSouthAfricanIdDetails } from '../utils/southAfricanId';
 import type {
   ClientFormValues,
   NotificationChannel,
@@ -136,7 +139,9 @@ export default function ClientFormScreen({
   }, [form.preferredContactChannel]);
 
   const idSummary = useMemo(() => {
-    return deriveSouthAfricanIdSummary(form.idNumber);
+    const details = deriveSouthAfricanIdDetails(form.idNumber);
+    if (!details) return null;
+    return `Date of birth: ${details.dateOfBirth} · Age: ${details.age} · Gender: ${details.gender} · Confirm citizenship below`;
   }, [form.idNumber]);
 
   useEffect(() => {
@@ -343,6 +348,15 @@ export default function ClientFormScreen({
       </View>
 
       <Saps271DeclarationsSection value={form.saps271Declarations} disabled={saving} onChange={(value) => updateField('saps271Declarations', value)} />
+      <Saps517ApplicantSection
+        value={form.saps271Declarations}
+        idNumber={form.idNumber}
+        disabled={saving}
+        onChange={(saps517) => updateField('saps271Declarations', {
+          ...(form.saps271Declarations ?? emptySaps271Declarations()),
+          saps517,
+        })}
+      />
 
       <Card
         subtitle="The firearm owner’s primary identifying information."

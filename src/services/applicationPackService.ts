@@ -477,6 +477,16 @@ function wrapText(text: string, maxLength = 88): string[] {
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
+    if (word.length > maxLength) {
+      if (line) {
+        lines.push(line);
+        line = '';
+      }
+      for (let offset = 0; offset < word.length; offset += maxLength) {
+        lines.push(word.slice(offset, offset + maxLength));
+      }
+      continue;
+    }
     const candidate = line ? `${line} ${word}` : word;
     if (candidate.length > maxLength && line) {
       lines.push(line);
@@ -487,6 +497,60 @@ function wrapText(text: string, maxLength = 88): string[] {
   }
   if (line) lines.push(line);
   return lines.length ? lines : [''];
+}
+
+function asciiPdfText(value: unknown): string {
+  return String(value ?? '').normalize('NFKD').replace(/[^\x20-\x7E]/g, '?');
+}
+
+async function addResearchProvenancePages(
+  target: PDFDocumentType,
+  manifest: ApplicationPackManifest,
+  pdfLib: typeof import('pdf-lib')
+): Promise<void> {
+  const { StandardFonts } = pdfLib;
+  const researchItems = manifest.items.filter((item) =>
+    item.document?.document_type === 'SUPPORTING_RESEARCH'
+  );
+  if (researchItems.length === 0) return;
+
+  for (const item of researchItems) {
+    const metadata = item.document?.metadata ?? {};
+    const source = (metadata.researchSource ?? {}) as Record<string, unknown>;
+    const context = (metadata.researchContext ?? {}) as Record<string, unknown>;
+    const firearm = (context.firearm ?? {}) as Record<string, unknown>;
+    const page = target.addPage([A4_WIDTH, A4_HEIGHT]);
+    const regularFont = await target.embedFont(StandardFonts.Helvetica);
+    const boldFont = await target.embedFont(StandardFonts.HelveticaBold);
+    page.drawText('RESEARCH SOURCE PROVENANCE', { x: 44, y: 790, size: 16, font: boldFont });
+    let y = 758;
+    const rows: Array<[string, unknown]> = [
+      ['Application document', item.document?.document_name],
+      ['Source title', source.title ?? metadata.sourceTitle],
+      ['Publisher / authority', source.publisher ?? metadata.sourcePublisher],
+      ['Source URL or archive path', source.url ?? metadata.sourceUrl],
+      ['Source retrieval date', source.retrievalDate],
+      ['Review status', source.trustLevel ?? 'UNREVIEWED'],
+      ['Sport discipline', context.discipline ?? source.discipline],
+      ['Sport association', context.association ?? source.association],
+      ['Firearm / calibre context', [firearm.make, firearm.model, firearm.calibre].filter(Boolean).join(' ')],
+      ['Context captured', context.accessedAt ?? context.generatedAt],
+    ];
+
+    for (const [label, rawValue] of rows) {
+      const value = asciiPdfText(rawValue || 'Not recorded');
+      page.drawText(`${label}:`, { x: 44, y, size: 9, font: boldFont });
+      y -= 14;
+      for (const line of wrapText(value, 88)) {
+        page.drawText(line, { x: 56, y, size: 9, font: regularFont, maxWidth: 500 });
+        y -= 12;
+      }
+      y -= 5;
+    }
+    page.drawText('Local archive material is not live-verified research. Confirm source claims and applicant relevance before submission.', {
+      x: 44, y: Math.max(y - 8, 48), size: 8, font: regularFont, maxWidth: 505,
+    });
+  }
 }
 
 async function addCoverAndChecklist(
@@ -630,7 +694,7 @@ async function findExistingPdfWorkingCopy(source: DocumentRecord): Promise<Docum
   return (result.data?.[0] as DocumentRecord | undefined) ?? null;
 }
 
-async function createMotivationPdfWorkingCopy(
+async function createDocxPdfWorkingCopy(
   source: DocumentRecord,
   dealerId: string,
   userId: string,
@@ -643,7 +707,7 @@ async function createMotivationPdfWorkingCopy(
   const sourceUrl = await createDocumentSignedUrl(source.storage_path);
   const sourceResponse = await fetch(sourceUrl);
   if (!sourceResponse.ok) {
-    throw new Error(`The selected motivation DOCX could not be downloaded (${sourceResponse.status}).`);
+    throw new Error(`The selected application DOCX could not be downloaded (${sourceResponse.status}).`);
   }
 
   let pdfBytes: Uint8Array;
@@ -651,7 +715,7 @@ async function createMotivationPdfWorkingCopy(
     pdfBytes = await renderDocxAsPdf(new Uint8Array(await sourceResponse.arrayBuffer()));
   } catch (error) {
     throw new Error(
-      `The selected motivation could not be converted to PDF. ${
+      `The selected application document could not be converted to PDF. ${
         error instanceof Error ? error.message : 'The browser DOCX renderer failed.'
       }`
     );
@@ -662,9 +726,9 @@ async function createMotivationPdfWorkingCopy(
     .replace(/\.docx$/i, '')
     .replace(/[^a-zA-Z0-9._-]+/g, '_')
     .replace(/_+/g, '_')
-    .slice(0, 90) || 'motivation';
+    .slice(0, 90) || 'application-document';
   const fileName = `${baseName}_${timestamp}.pdf`;
-  const storagePath = `${dealerId}/${clientId}/MOTIVATION/GENERATED_PDF/${fileName}`;
+  const storagePath = `${dealerId}/${clientId}/${source.document_type}/GENERATED_PDF/${fileName}`;
   const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' });
   const upload = await db.storage
     .from(DOCUMENT_BUCKET)
@@ -698,7 +762,7 @@ async function createMotivationPdfWorkingCopy(
       is_verified: source.is_verified,
       is_generated: true,
       generated_from_template_id: source.generated_from_template_id,
-      notes: 'Browser-rendered PDF working copy. The original DOCX remains unchanged and linked as the parent document.',
+      notes: 'Browser-rendered PDF working copy. The original DOCX remains unchanged and linked as the parent document. Source research metadata is retained.',
       metadata: {
         ...source.metadata,
         sourceDocumentId: source.id,
@@ -723,21 +787,24 @@ export async function generateAndArchiveApplicationPack(input: {
   clientId: string;
   applicationCaseId: string;
 }): Promise<ApplicationPackGenerationResult> {
+  if (!input.userId?.trim()) throw new Error('Sign in before saving an application pack.');
   const manifest = await buildApplicationPackManifest(input.clientId, input.applicationCaseId);
   if (manifest.packState !== 'READY') {
     throw new Error(`The final application pack cannot be generated yet. ${manifest.blockingReasons.join(' ') || 'Resolve verification warnings first.'}`);
   }
 
-  const pdfLib = await import('pdf-lib');
+  // Match the official renderer: Metro's ES entry hits tslib 1.x default interop.
+  const pdfLib = await import('pdf-lib/cjs/index.js');
   const pdf = await pdfLib.PDFDocument.create();
   await addCoverAndChecklist(pdf, manifest, pdfLib);
+  await addResearchProvenancePages(pdf, manifest, pdfLib);
   const includedDocumentIds: string[] = [];
   const skippedDocuments: Array<{ documentId: string; name: string; reason: string }> = [];
 
   for (const item of manifest.items.sort((a, b) => a.order - b.order)) {
     if (item.delivery !== 'DIGITAL' || !item.document) continue;
-    const packDocument = item.document.document_type === 'MOTIVATION' && isDocxDocument(item.document)
-      ? await createMotivationPdfWorkingCopy(
+    const packDocument = ['MOTIVATION', 'SUPPORTING_RESEARCH'].includes(item.document.document_type) && isDocxDocument(item.document)
+      ? await createDocxPdfWorkingCopy(
           item.document,
           input.dealerId,
           input.userId,
@@ -769,6 +836,8 @@ export async function generateAndArchiveApplicationPack(input: {
   if (upload.error) throw new Error(upload.error.message);
 
   const inserted = await db.from('documents').insert({
+    owner_user_id: input.userId,
+    record_scope: 'PRIVATE',
     dealer_id: input.dealerId,
     client_id: input.clientId,
     competency_id: null,
@@ -804,11 +873,26 @@ export async function generateAndArchiveApplicationPack(input: {
       renderer: 'LICENCEGUARD_APPLICATION_PACK_V1',
     },
     uploaded_by: input.userId,
-  }).select('*').single();
+  });
 
   if (inserted.error) {
     await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
     throw new Error(inserted.error.message);
+  }
+
+  // As with generated SAPS forms, INSERT RETURNING cannot use the deployed
+  // STABLE SELECT-policy helper to look up this statement's newly inserted row.
+  const saved = await db.from('documents').select('*')
+    .eq('storage_path', storagePath)
+    .eq('dealer_id', input.dealerId)
+    .eq('client_id', input.clientId)
+    .eq('application_case_id', input.applicationCaseId)
+    .eq('owner_user_id', input.userId)
+    .eq('record_scope', 'PRIVATE')
+    .single();
+  if (saved.error || !saved.data) {
+    // Registration has committed; retain its PDF on a read-back failure.
+    throw new Error(`The application pack was saved, but could not be read back. Reload the application before compiling again. ${saved.error?.message ?? 'No authorized document returned.'}`);
   }
 
   const statusUpdate = await db.from('application_cases').update({
@@ -820,7 +904,7 @@ export async function generateAndArchiveApplicationPack(input: {
   if (statusUpdate.error) throw new Error(statusUpdate.error.message);
 
   return {
-    document: inserted.data as DocumentRecord,
+    document: saved.data as DocumentRecord,
     manifest: { ...manifest, caseStatus: 'READY_FOR_SUBMISSION' },
     includedDocumentIds,
     skippedDocuments,

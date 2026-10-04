@@ -2,6 +2,7 @@ import { REFERENCE_LIBRARY_ITEMS, type ReferenceLibraryItem } from '../data/refe
 import { supabase } from '../lib/supabase';
 import type { ApplicationCaseType } from '../types/applicationCase';
 import type { FirearmType } from '../types/firearm';
+import { buildApplicationResearchContext } from './applicationResearchService';
 import { addReferenceDocumentToClient } from './referenceLibraryService';
 
 const db = supabase as any;
@@ -17,6 +18,9 @@ type CaseContext = {
   caseId: string;
   applicationType: ApplicationCaseType;
   licenceSection: string | null;
+  primaryPurpose: string | null;
+  sportDiscipline: string | null;
+  sportAssociation: string | null;
   motivationSummary: string | null;
   client: {
     id: string;
@@ -139,6 +143,18 @@ function applicationPurposeTerms(applicationType: ApplicationCaseType, licenceSe
   return terms;
 }
 
+function extractDisciplineTerms(summary: string | null): string[] {
+  const text = normalise(summary ?? '');
+  if (!text) return [];
+
+  const disciplineTerms = [
+    'trap', 'skeet', 'sporting clay', 'clay target', 'field shooting', 'benchrest',
+    'practical', 'ipsc', 'silhouette', 'pistol', 'rifle', 'hunting', 'target shooting'
+  ];
+
+  return disciplineTerms.filter((term) => text.includes(normalise(term)));
+}
+
 function scoreItem(item: ReferenceLibraryItem, context: CaseContext, kind: ApplicationDocumentSuggestion['kind']): ApplicationDocumentSuggestion | null {
   if (!context.firearm) return null;
 
@@ -192,6 +208,20 @@ function scoreItem(item: ReferenceLibraryItem, context: CaseContext, kind: Appli
     score += 8;
     reasons.push('application purpose matches');
   }
+  const statedPurpose = normalise(context.primaryPurpose);
+  if (statedPurpose && text.includes(statedPurpose)) {
+    score += 10;
+    reasons.push(`stated purpose matches ${context.primaryPurpose}`);
+  }
+
+  const disciplineTerms = extractDisciplineTerms(context.sportDiscipline);
+  if (disciplineTerms.length > 0) {
+    const matchedDiscipline = disciplineTerms.find((term) => text.includes(normalise(term)));
+    if (matchedDiscipline) {
+      score += 12;
+      reasons.push(`discipline matches ${matchedDiscipline}`);
+    }
+  }
 
   if (kind === 'MOTIVATION' && item.documentType !== 'MOTIVATION') return null;
   if (kind === 'FIREARM_INFORMATION' && !['SUPPORTING_RESEARCH', 'SUPPORTING_DOCUMENT'].includes(item.documentType)) return null;
@@ -202,7 +232,7 @@ function scoreItem(item: ReferenceLibraryItem, context: CaseContext, kind: Appli
 export async function getApplicationDocumentContext(applicationCaseId: string): Promise<CaseContext> {
   const caseResult = await db
     .from('application_cases')
-    .select('id,client_id,application_type,licence_section,motivation_summary,firearm_id')
+    .select('id,client_id,application_type,licence_section,primary_purpose,sport_discipline,sport_association,motivation_summary,firearm_id')
     .eq('id', applicationCaseId)
     .single();
 
@@ -222,6 +252,9 @@ export async function getApplicationDocumentContext(applicationCaseId: string): 
     caseId: caseResult.data.id,
     applicationType: caseResult.data.application_type,
     licenceSection: caseResult.data.licence_section,
+    primaryPurpose: caseResult.data.primary_purpose,
+    sportDiscipline: caseResult.data.sport_discipline,
+    sportAssociation: caseResult.data.sport_association,
     motivationSummary: caseResult.data.motivation_summary,
     client: {
       id: clientResult.data.id,
@@ -248,9 +281,23 @@ export async function getApplicationDocumentContext(applicationCaseId: string): 
   };
 }
 
-export async function suggestApplicationDocuments(applicationCaseId: string): Promise<{ context: CaseContext; suggestions: ApplicationDocumentSuggestion[] }> {
+export async function suggestApplicationDocuments(applicationCaseId: string): Promise<{ context: CaseContext; suggestions: ApplicationDocumentSuggestion[]; researchContext: ReturnType<typeof buildApplicationResearchContext> }> {
   const context = await getApplicationDocumentContext(applicationCaseId);
-  if (!context.firearm) return { context, suggestions: [] };
+  const researchContext = buildApplicationResearchContext({
+    applicationType: context.applicationType,
+    licenceSection: context.licenceSection,
+    motivationSummary: context.primaryPurpose,
+    firearm: context.firearm ? {
+      make: context.firearm.make,
+      model: context.firearm.model,
+      calibre: context.firearm.calibre,
+      firearmType: context.firearm.firearmType,
+    } : null,
+    sportDiscipline: context.sportDiscipline,
+    sportAssociation: context.sportAssociation,
+  });
+
+  if (!context.firearm) return { context, suggestions: [], researchContext };
 
   const motivations = REFERENCE_LIBRARY_ITEMS
     .map((item) => scoreItem(item, context, 'MOTIVATION'))
@@ -264,7 +311,7 @@ export async function suggestApplicationDocuments(applicationCaseId: string): Pr
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
-  return { context, suggestions: [...motivations, ...firearmInformation] };
+  return { context, suggestions: [...motivations, ...firearmInformation], researchContext };
 }
 
 export async function prepareSuggestedApplicationDocuments(input: {
@@ -274,6 +321,7 @@ export async function prepareSuggestedApplicationDocuments(input: {
   applicationCaseId: string;
   suggestions: ApplicationDocumentSuggestion[];
   context: CaseContext;
+  researchContext?: ReturnType<typeof buildApplicationResearchContext>;
 }): Promise<number> {
   const existingResult = await db
     .from('documents')
@@ -295,6 +343,7 @@ export async function prepareSuggestedApplicationDocuments(input: {
       userId: input.userId,
       clientId: input.clientId,
       applicationCaseId: input.applicationCaseId,
+      firearmId: input.context.firearm?.id ?? null,
       item: suggestion.item,
       personalisation: {
         client: input.context.client,
@@ -304,6 +353,17 @@ export async function prepareSuggestedApplicationDocuments(input: {
         motivationSummary: input.context.motivationSummary,
         matchReason: suggestion.reason,
       },
+      researchContext: input.researchContext ? {
+        provider: input.researchContext.provider,
+        discipline: input.researchContext.discipline,
+        association: input.researchContext.association,
+        firearm: input.researchContext.firearm,
+        sourceUrl: suggestion.item.sourceUrl ?? null,
+        sourceTitle: suggestion.item.sourceTitle ?? suggestion.item.title,
+        sourcePublisher: suggestion.item.sourcePublisher ?? suggestion.item.source ?? 'LicenceGuard reference archive',
+        accessedAt: input.researchContext.generatedAt,
+        findings: input.researchContext.findings,
+      } : null,
     });
     added += 1;
   }

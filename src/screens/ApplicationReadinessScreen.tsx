@@ -38,6 +38,10 @@ import {
   suggestApplicationDocuments,
   type ApplicationDocumentSuggestion,
 } from '../services/applicationDocumentSuggestionService';
+import {
+  archiveLiveApplicationResearch,
+  requestLiveApplicationResearch,
+} from '../services/applicationResearchService';
 import { orchestrateApplicationPack } from '../services/applicationOrchestratorService';
 import {
   getApplicationWorkspaceMeta,
@@ -62,6 +66,7 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ReadinessRequirement } from '../types/applicationReadiness';
 import { getDocumentTypeLabel, type DocumentRecord } from '../types/document';
+import type { ApplicationResearchContext } from '../types/research';
 import { getApplicationCaseTypeLabel, isFirearmApplicationType } from '../types/applicationCase';
 import type { RootStackParamList } from '../types/navigation';
 import { PHYSICAL_PASSPORT_PHOTO_REMINDER } from '../constants/submission';
@@ -88,6 +93,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const [showCompleted, setShowCompleted] = useState(false);
   const [suggestionResult, setSuggestionResult] = useState<SuggestionResult | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [liveResearch, setLiveResearch] = useState<ApplicationResearchContext | null>(null);
+  const [loadingLiveResearch, setLoadingLiveResearch] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -254,6 +261,60 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     }
   };
 
+  const openResearchSource = async (url: string) => {
+    try {
+      await openExternalDocument(() => url, {
+        applicationCaseId: applicationCase?.caseId,
+        clientId: route.params.clientId,
+        originatingRoute: 'ApplicationReadiness',
+        workflowStep: 'live-research-source',
+      });
+    } catch (error) {
+      Alert.alert('Unable to open research source', error instanceof Error ? error.message : 'The source link could not be opened.');
+    }
+  };
+
+  const researchOnline = async () => {
+    const suggestion = suggestionResult;
+    const context = suggestion?.context;
+    if (!suggestion || !context?.firearm || !applicationCase || !dealerProfile?.dealerId || !user?.id) {
+      Alert.alert('Unable to research application', 'The signed-in user, application, or firearm context is missing.');
+      return;
+    }
+
+    setLoadingLiveResearch(true);
+    try {
+      const result = await requestLiveApplicationResearch({
+        applicationType: context.applicationType,
+        licenceSection: context.licenceSection,
+        purpose: context.primaryPurpose,
+        discipline: suggestion.researchContext.discipline,
+        association: suggestion.researchContext.association,
+        firearm: {
+          make: context.firearm.make,
+          model: context.firearm.model,
+          calibre: context.firearm.calibre,
+          firearmType: context.firearm.firearmType,
+        },
+      });
+      if (result.sourceCount === 0) throw new Error('The provider returned no usable source results.');
+      await archiveLiveApplicationResearch({
+        dealerId: dealerProfile.dealerId,
+        userId: user.id,
+        clientId: route.params.clientId,
+        applicationCaseId: applicationCase.caseId,
+        firearmId: context.firearm.id,
+        context: result,
+      });
+      setLiveResearch(result);
+      await loadData();
+    } catch (error) {
+      Alert.alert('Unable to research application', error instanceof Error ? error.message : 'The live research request failed.');
+    } finally {
+      setLoadingLiveResearch(false);
+    }
+  };
+
   const saveDraft = useCallback(async () => {
     if (!applicationCase?.caseId || !user?.id) return;
     setSaving(true);
@@ -353,6 +414,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 
   const openRequirement = (requirement: ReadinessRequirement) => {
+    if (requirement.key === 'SAPS517_APPLICANT_DATA') {
+      navigation.navigate('ClientForm', { clientId: route.params.clientId });
+      return;
+    }
     if (requirement.state === 'PENDING_GENERATION') {
       navigation.navigate('ApplicationAutofill', {
         clientId: route.params.clientId,
@@ -365,7 +430,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         clientId: route.params.clientId,
         applicationCaseId: applicationCase.caseId,
         documentType: requirement.documentType,
-        openUpload: true,
+        openUpload: !findRequirementDocument(requirement)?.is_generated,
         evidenceKind: requirement.evidenceKind,
         firearmId: requirement.requiresFirearmMatch ? applicationCase.firearmId ?? undefined : undefined,
         documentScope: requirement.evidenceKind ? 'CLIENT' : 'APPLICATION_CASE',
@@ -381,6 +446,9 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
   const motivationRequirement = applicationCase.requirements.find(
     (requirement) => requirement.documentType === 'MOTIVATION'
+  );
+  const saps517ApplicantRequirement = applicationCase.requirements.find(
+    (requirement) => requirement.key === 'SAPS517_APPLICANT_DATA'
   );
   const sapsFormRequirement = applicationCase.requirements.find(
     (requirement) =>
@@ -419,6 +487,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     );
   const motivationComplete =
     !motivationRequirement ||
+    !motivationRequirement.required ||
     motivationRequirement.state === 'SATISFIED';
   const sapsFormComplete =
     !sapsFormRequirement ||
@@ -433,7 +502,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 
   const workflowCompletion = [
-    true,
+    !saps517ApplicantRequirement || saps517ApplicantRequirement.state === 'SATISFIED',
     Boolean(applicationCase.firearmId) ||
       !applicationCase.applicationType.startsWith('FIREARM_'),
     competencyComplete,
@@ -458,16 +527,16 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
     {
       key: 'client',
       number: 1,
-      title: 'Client',
-      detail: 'Client details are linked to this application.',
-      complete: workflowCompletion[0],
+      title: 'Applicant details',
+      detail: saps517ApplicantRequirement?.state === 'MISSING'
+        ? 'Complete the required SAPS 517 applicant information in the client profile.'
+        : 'Client details are linked to this application.',
+      complete: !saps517ApplicantRequirement || saps517ApplicantRequirement.state === 'SATISFIED',
       current: activeWorkflowIndex === 0,
-      actionLabel: 'Edit application',
-      onPress: () =>
-        navigation.navigate('ApplicationCaseForm', {
-          clientId: route.params.clientId,
-          applicationCaseId: applicationCase.caseId,
-        }),
+      actionLabel: saps517ApplicantRequirement?.state === 'MISSING' ? 'Complete applicant details' : 'Edit client profile',
+      onPress: () => saps517ApplicantRequirement?.state === 'MISSING'
+        ? openRequirement(saps517ApplicantRequirement)
+        : navigation.navigate('ClientForm', { clientId: route.params.clientId }),
     },
     {
       key: 'firearm',
@@ -521,7 +590,9 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       key: 'motivation',
       number: 5,
       title: 'Motivation',
-      detail: motivationComplete
+      detail: motivationRequirement && !motivationRequirement.required
+        ? 'A supporting motivation is optional for this application.'
+        : motivationComplete
         ? 'The motivation is attached and ready.'
         : 'Add, generate or confirm the application motivation.',
       complete: workflowCompletion[4],
@@ -543,7 +614,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       complete: workflowCompletion[5],
       current: activeWorkflowIndex === 5,
       actionLabel: sapsFormRequirement
-        ? 'Prepare SAPS form'
+        ? sapsFormComplete ? 'Review SAPS form' : 'Prepare SAPS form'
         : undefined,
       onPress: sapsFormRequirement
         ? () => openRequirement(sapsFormRequirement)
@@ -938,6 +1009,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                       title={
                         requirement.state === 'PENDING_GENERATION'
                           ? 'Generate'
+                          : document?.is_generated
+                            ? 'Review'
                           : document
                             ? 'Replace'
                             : 'Upload'
@@ -998,6 +1071,15 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
           title="Suggested application documents"
           subtitle="LicenceGuard matches the calibre first, then checks firearm category, make, model and application purpose. Conflicting calibres are rejected."
         >
+          <Button
+            leftIcon={<BookOpenCheck color={Colors.silver} size={16} />}
+            loading={loadingLiveResearch}
+            disabled={loadingSuggestions}
+            onPress={() => void researchOnline()}
+            size="small"
+            title="Research online"
+            variant="secondary"
+          />
           {loadingSuggestions ? (
             <View style={styles.suggestionLoading}>
               <ActivityIndicator color={Colors.primary} />
@@ -1028,6 +1110,27 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
               <Text style={styles.noMatchText}>No safe match was found. Add a suitable motivation or firearm-information document rather than reusing an incompatible one.</Text>
             </View>
           )}
+          {liveResearch ? (
+            <View style={styles.suggestionContent}>
+              <Text style={styles.helperText}>
+                {liveResearch.sourceCount} live source{liveResearch.sourceCount === 1 ? '' : 's'} archived as unreviewed research. Review each original page before relying on a claim.
+              </Text>
+              {liveResearch.sources.map((source) => (
+                <Pressable
+                  key={source.id}
+                  onPress={() => source.url && void openResearchSource(source.url)}
+                  style={styles.generatedRow}
+                >
+                  <View style={styles.generatedText}>
+                    <Text style={styles.generatedTitle}>{source.title}</Text>
+                    <Text style={styles.generatedMeta}>{source.publisher ?? source.url}</Text>
+                    <Text style={styles.helperText}>{source.summary}</Text>
+                  </View>
+                  <ExternalLink color={Colors.silver} size={17} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </Card>
       ) : null}
 

@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { declarationReadinessIssues } from '../utils/saps271Declarations';
+import { saps517RequiredProfileIssues } from '../utils/saps517Applicant';
+import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import type { Saps271Declarations } from '../types/saps271Declarations';
 import { isApplicationTypeSupportedInBeta, UNSUPPORTED_APPLICATION_TYPE_MESSAGE } from '../utils/unsupportedApplicationTypePolicy';
 import type {
@@ -23,7 +25,7 @@ const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
   'FIREARM_LICENCE_RENEWAL_FORM',
 ]);
 
-type ClientRow = { first_name: string; surname: string; saps271_declarations?: Saps271Declarations | null };
+type ClientRow = { first_name: string; surname: string; id_number: string; address_line_1?: string; city?: string; province?: string; postal_code?: string; saps271_declarations?: Saps271Declarations | null };
 type CaseRow = {
   created_at?: string;
   id: string;
@@ -37,6 +39,8 @@ type CaseRow = {
   acquisition_source: 'DEALER' | 'PRIVATE_SELLER' | 'EXISTING_FIREARM' | 'NOT_APPLICABLE' | null;
   supplier_name: string | null;
   supplier_id_or_registration: string | null;
+  primary_purpose: string | null;
+  sport_discipline: string | null;
 };
 type CompetencyRow = {
   id: string;
@@ -83,7 +87,8 @@ const REQUIREMENTS: Partial<Record<ApplicationCaseType, RequirementDefinition[]>
   COMPETENCY_FIRST_APPLICATION: [
     ...COMMON,
     { key: 'COMPETENCY_APPLICATION', label: 'Competency application form', detail: 'The applicable SAPS competency application form.', documentType: 'COMPETENCY_APPLICATION', required: true },
-    { key: 'MOTIVATION', label: 'Competency motivation', detail: 'Motivation supporting the competency application.', documentType: 'MOTIVATION', required: true },
+    { key: 'SAPS517_APPLICANT_DATA', label: 'SAPS 517 applicant information', detail: 'Complete required applicant particulars, Section G answers, and H5–H16 declarations in the client profile.', documentType: null, required: true },
+    { key: 'MOTIVATION', label: 'Optional competency supporting motivation', detail: 'A supporting motivation may be added, but it is not required to generate an ordinary adult first competency SAPS 517.', documentType: 'MOTIVATION', required: false },
   ],
   COMPETENCY_ADDITIONAL_CATEGORY: [
     ...COMMON,
@@ -100,6 +105,7 @@ const REQUIREMENTS: Partial<Record<ApplicationCaseType, RequirementDefinition[]>
   COMPETENCY_REAPPLICATION: [
     ...COMMON,
     { key: 'COMPETENCY_APPLICATION', label: 'Competency application form', detail: 'The applicable SAPS competency application form.', documentType: 'COMPETENCY_APPLICATION', required: true },
+    { key: 'SAPS517_APPLICANT_DATA', label: 'SAPS 517 applicant information', detail: 'Complete required applicant particulars, Section G answers, and H5–H16 declarations in the client profile.', documentType: null, required: true },
     { key: 'COMPETENCY_CERTIFICATE', label: 'Previous competency certificate', detail: 'Copy of the previous competency certificate, when available.', documentType: 'COMPETENCY_CERTIFICATE', required: false },
     { key: 'MOTIVATION', label: 'Reapplication motivation', detail: 'Motivation explaining the reapplication.', documentType: 'MOTIVATION', required: true },
   ],
@@ -219,9 +225,13 @@ function sectionExpectedYears(section: string | null): number | null {
   return null;
 }
 
+function isSportShootingPurpose(purpose: string | null): boolean {
+  return Boolean(purpose && /sport\s+shooting/i.test(purpose));
+}
+
 export async function getClientApplicationReadiness(clientId: string): Promise<ClientApplicationReadiness> {
   const [clientResult, casesResult, competenciesResult, firearmsResult, licencesResult, documentsResult] = await Promise.all([
-    db.from('clients').select('first_name,surname,saps271_declarations').eq('id', clientId).single(),
+    db.from('clients').select('first_name,surname,id_number,address_line_1,city,province,postal_code,saps271_declarations').eq('id', clientId).single(),
     db.from('application_cases').select('*').eq('client_id', clientId).order('opened_date', { ascending: false }),
     db.from('competencies').select('id,category,certificate_number,issue_date,verified').eq('client_id', clientId),
     db.from('firearms').select('id,make,model,calibre,serial_number,required_competency').eq('client_id', clientId).eq('is_active', true),
@@ -249,9 +259,15 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     if (!isApplicationTypeSupportedInBeta(applicationCase.application_type)) {
       return { caseId: applicationCase.id, applicationType: applicationCase.application_type, subject: 'Unsupported application', status: applicationCase.status, competencyCategory: category, firearmId: applicationCase.firearm_id, firearmLicenceId: applicationCase.firearm_licence_id, licenceSection: applicationCase.licence_section ?? licence?.licence_section ?? null, score: 0, state: 'BLOCKED' as const, readyToGenerate: false, requirements: [], missingCount: 0, warningCount: 0, unsupportedMessage: UNSUPPORTED_APPLICATION_TYPE_MESSAGE };
     }
-    const matchingCompetency = category ? competencies.find((item) => item.category === category) : undefined;
+    const matchingCompetency = resolveReusableCompetency(
+      competencies, category, applicationCase.competency_id,
+      applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY'
+    );
     const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
-    const definitions: RequirementDefinition[] = [...baseDefinitions];
+    const definitions: RequirementDefinition[] = baseDefinitions.map((definition) => ({ ...definition }));
+    if (applicationCase.competency_id && !matchingCompetency) {
+      definitions.push({ key: 'COMPETENCY_RECORD', label: 'Linked competency record', detail: 'The linked competency is unavailable for this client or does not match the application category. Review the application link.', documentType: null, required: true });
+    }
 
     if (applicationCase.application_type.startsWith('FIREARM_LICENCE_')) {
       definitions.push({
@@ -279,6 +295,19 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     }
 
     const section = (applicationCase.licence_section ?? licence?.licence_section ?? '').replace(/[^0-9]/g, '');
+    if (applicationCase.application_type.startsWith('FIREARM_LICENCE_')) {
+      if (!section) {
+        definitions.unshift({ key: 'LICENCE_SECTION', label: 'Firearm licence section', detail: 'Select the lawful SAPS licence section for this application.', documentType: null, required: true });
+      }
+      if (!applicationCase.primary_purpose?.trim()) {
+        definitions.unshift({ key: 'PRIMARY_PURPOSE', label: 'Applicant’s primary lawful purpose', detail: 'Record the applicant’s intended lawful use for this firearm.', documentType: null, required: true });
+      }
+      if (['15', '16'].includes(section)
+        && isSportShootingPurpose(applicationCase.primary_purpose)
+        && !applicationCase.sport_discipline?.trim()) {
+        definitions.unshift({ key: 'SPORT_DISCIPLINE', label: 'Specific sport-shooting discipline or category', detail: 'Generic sport-shooting wording is insufficient. Record the applicant’s actual discipline or category.', documentType: null, required: true });
+      }
+    }
     if (section === '16') {
       definitions.push(
         { key: 'DEDICATED_STATUS', label: 'Dedicated status certificate', detail: 'Required proof of current dedicated status for a Section 16 application.', documentType: 'DEDICATED_STATUS', required: true },
@@ -301,6 +330,12 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
         state = !matchingCompetency || !matchingCompetency.certificate_number || !matchingCompetency.issue_date
           ? 'MISSING'
           : matchingCompetency.verified ? 'SATISFIED' : 'UNVERIFIED';
+      } else if (definition.key === 'SAPS517_APPLICANT_DATA') {
+        const issues = saps517RequiredProfileIssues(client, applicationCase.competency_category);
+        definition.detail = issues.join(' ') || 'Required SAPS 517 applicant information is complete.';
+        state = issues.length > 0
+          ? 'MISSING'
+          : 'SATISFIED';
       } else {
         const linked = selectRequirementDocument(
           documents,

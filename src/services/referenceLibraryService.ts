@@ -71,6 +71,7 @@ export async function addReferenceDocumentToClient(
     userId: string;
     clientId: string;
     applicationCaseId?: string;
+    firearmId?: string | null;
     item: ReferenceLibraryItem;
     personalisation?: {
       client: Record<string, unknown>;
@@ -80,6 +81,17 @@ export async function addReferenceDocumentToClient(
       motivationSummary: string | null;
       matchReason: string;
     };
+    researchContext?: {
+      provider: string;
+      discipline: string | null;
+      association: string | null;
+      firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null } | null;
+      sourceUrl: string | null;
+      sourceTitle: string | null;
+      sourcePublisher: string | null;
+      accessedAt: string;
+      findings: Array<{ subject: string; summary: string; sourceId: string | null; sourceTitle?: string | null; sourceUrl?: string | null }>;
+    } | null;
   }
 ): Promise<DocumentRecord> {
   const sourceUrl = buildReferenceLibraryUrl(
@@ -137,7 +149,7 @@ export async function addReferenceDocumentToClient(
       dealer_id: input.dealerId,
       client_id: input.clientId,
       competency_id: null,
-      firearm_id: null,
+      firearm_id: input.firearmId ?? null,
       firearm_licence_id: null,
       application_case_id:
         input.applicationCaseId ?? null,
@@ -174,6 +186,22 @@ export async function addReferenceDocumentToClient(
         referenceCategory: input.item.category,
         referenceApplicationFolder:
           input.item.applicationFolder,
+        sourceTitle: input.item.sourceTitle ?? input.item.title,
+        sourcePublisher: input.item.sourcePublisher ?? input.item.source ?? 'LicenceGuard reference archive',
+        sourceUrl: input.item.sourceUrl ?? buildReferenceLibraryUrl(input.item.relativePath),
+        researchSource: {
+          title: input.item.sourceTitle ?? input.item.title,
+          publisher: input.item.sourcePublisher ?? null,
+          url: input.item.sourceUrl ?? buildReferenceLibraryUrl(input.item.relativePath),
+          retrievalDate: input.item.retrievalDate ?? null,
+          trustLevel: input.item.trustLevel ?? 'UNREVIEWED',
+          category: input.item.category,
+          discipline: input.item.discipline ?? null,
+          association: input.item.association ?? null,
+          summary: input.item.summary ?? null,
+          applicability: input.item.applicability ?? null,
+        },
+        researchContext: input.researchContext ?? null,
         workingCopyStatus: input.personalisation
           ? 'PERSONALISATION_CONTEXT_ATTACHED'
           : 'REFERENCE_COPY',

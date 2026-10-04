@@ -51,8 +51,8 @@ type ApplicationCaseContext = {
   licences: FirearmLicenceRow[];
 };
 
-function emptyToNull(value: string): string | null {
-  const trimmed = value.trim();
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = (value ?? '').trim();
 
   return trimmed.length > 0 ? trimmed : null;
 }
@@ -463,6 +463,9 @@ function buildPayload(
     sale_or_invoice_reference: firearmApplication
       ? emptyToNull(values.saleOrInvoiceReference)
       : null,
+    primary_purpose: firearmApplication ? emptyToNull(values.primaryPurpose) : null,
+    sport_discipline: firearmApplication ? emptyToNull(values.sportDiscipline) : null,
+    sport_association: firearmApplication ? emptyToNull(values.sportAssociation) : null,
     motivation_summary: emptyToNull(values.motivationSummary),
 
     opened_date: values.openedDate.trim(),

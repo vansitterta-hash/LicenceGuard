@@ -4,6 +4,7 @@ import type { DocumentRecord, DocumentType } from '../types/document';
 import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
 import { getSapsTemplate } from '../data/sapsTemplateRegistry';
 import { renderOfficialPdfTemplate } from '../engines/pdfTemplateRenderer';
+import { saps517RequiredProfileIssues, saps517ApplicantFields, saps517Address } from '../utils/saps517Applicant';
 
 const DOCUMENT_BUCKET = 'licenceguard-documents';
 const db = supabase as any;
@@ -49,7 +50,7 @@ export function createReviewValues(data: ApplicationAutofillPackage): Applicatio
     cellphone: data.applicant.cellphone,
     alternateCellphone: data.applicant.alternateCellphone,
     email: data.applicant.email,
-    residentialAddress: data.applicant.residentialAddress,
+    residentialAddress: data.application.formCode === 'SAPS_517' ? data.saps517Applicant?.residentialAddress ?? data.applicant.residentialAddress : data.applicant.residentialAddress,
     suburb: data.applicant.suburb,
     city: data.applicant.city,
     province: data.applicant.province,
@@ -123,6 +124,43 @@ function documentTypeFor(data: ApplicationAutofillPackage): DocumentType {
   return 'COMPETENCY_APPLICATION';
 }
 
+function generatedDocumentPrivacy(userId: string) {
+  if (!userId?.trim()) throw new Error('Sign in before saving a generated application document.');
+  // Callers pass the signed-in user's ID. uploaded_by is provenance, not the
+  // ownership used by documents RLS (including INSERT ... RETURNING).
+  return { owner_user_id: userId, record_scope: 'PRIVATE' as const };
+}
+
+async function registerGeneratedDocument(payload: Record<string, unknown> & {
+  dealer_id: string;
+  client_id: string;
+  application_case_id: string;
+  owner_user_id: string;
+  storage_path: string;
+}): Promise<DocumentRecord> {
+  // Do not request INSERT RETURNING: the deployed SELECT policy uses a STABLE
+  // helper that re-reads documents and cannot see this statement's new row.
+  // Both requests use the caller's normal authenticated, RLS-enforced client.
+  const inserted = await db.from('documents').insert(payload);
+  if (inserted.error) {
+    await db.storage.from(DOCUMENT_BUCKET).remove([payload.storage_path]);
+    throw new Error(inserted.error.message);
+  }
+  const saved = await db.from('documents').select('*')
+    .eq('storage_path', payload.storage_path)
+    .eq('dealer_id', payload.dealer_id)
+    .eq('client_id', payload.client_id)
+    .eq('application_case_id', payload.application_case_id)
+    .eq('owner_user_id', payload.owner_user_id)
+    .eq('record_scope', 'PRIVATE')
+    .single();
+  if (saved.error || !saved.data) {
+    // The insert has committed. Keep its PDF intact if read-back fails.
+    throw new Error(`The generated PDF was saved, but could not be read back. Reload the application before generating again. ${saved.error?.message ?? 'No authorized document returned.'}`);
+  }
+  return saved.data as DocumentRecord;
+}
+
 export async function archiveCompletedApplication(input: {
   dealerId: string;
   clientId: string;
@@ -130,6 +168,7 @@ export async function archiveCompletedApplication(input: {
   data: ApplicationAutofillPackage;
   values: ApplicationReviewValues;
 }): Promise<DocumentRecord> {
+  const privacy = generatedDocumentPrivacy(input.userId);
   const html = buildCompletedApplicationHtml(input.data, input.values);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = `${input.data.application.formCode}_${timestamp}.html`;
@@ -142,7 +181,8 @@ export async function archiveCompletedApplication(input: {
   });
   if (upload.error) throw new Error(upload.error.message);
 
-  const inserted = await db.from('documents').insert({
+  return registerGeneratedDocument({
+    ...privacy,
     dealer_id: input.dealerId,
     client_id: input.clientId,
     competency_id: null,
@@ -176,13 +216,7 @@ export async function archiveCompletedApplication(input: {
       reviewValues: input.values,
     },
     uploaded_by: input.userId,
-  }).select('*').single();
-
-  if (inserted.error) {
-    await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
-    throw new Error(inserted.error.message);
-  }
-  return inserted.data as DocumentRecord;
+  });
 }
 
 
@@ -190,6 +224,24 @@ export async function generateOfficialApplicationPdf(
   data: ApplicationAutofillPackage,
   values: ApplicationReviewValues
 ): Promise<Uint8Array> {
+  if (data.application.formCode === 'SAPS_517') {
+    const address = saps517Address({ address_line_1: values.residentialAddress, suburb: values.suburb, city: values.city, province: values.province });
+    data = { ...data, saps517Applicant: saps517ApplicantFields({
+      profile: data.saps271Declarations, idNumber: values.idNumber, competencyCategory: data.competency?.category,
+      residentialAddress: address.street, residentialLocality: address.locality, residentialPostalCode: values.postalCode,
+    }) };
+    const issues = saps517RequiredProfileIssues({
+      first_name: values.firstName, surname: values.surname, id_number: values.idNumber,
+      address_line_1: data.saps517Applicant?.residentialAddress, city: values.city,
+      province: values.province, postal_code: values.postalCode, saps271_declarations: data.saps271Declarations,
+    }, data.competency?.category);
+    if (values.idNumber !== data.applicant.idNumber || values.competencyCategory !== data.competency?.category) {
+      issues.push('Save identity changes in the client profile and competency changes in the application case, then reload the form.');
+    }
+    if (!data.canGenerate || issues.length || mapApplicationToSapsTemplate(data, values).missingRequiredFieldCount) {
+      throw new Error(`Complete the required SAPS 517 applicant information before generating. ${issues.join(' ')}`);
+    }
+  }
   const template = getSapsTemplate(data.application.formCode);
   return renderOfficialPdfTemplate({ template: template as never, context: { data, reviewValues: values } });
 }
@@ -200,8 +252,11 @@ export async function archiveOfficialApplicationPdf(input: {
   userId: string;
   data: ApplicationAutofillPackage;
   values: ApplicationReviewValues;
+  /** Persist the exact PDF already rendered by the generation action. */
+  bytes?: Uint8Array;
 }): Promise<DocumentRecord> {
-  const bytes = await generateOfficialApplicationPdf(input.data, input.values);
+  const privacy = generatedDocumentPrivacy(input.userId);
+  const bytes = input.bytes ?? await generateOfficialApplicationPdf(input.data, input.values);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = `${input.data.application.formCode}_${timestamp}.pdf`;
   const storagePath = `${input.dealerId}/${input.clientId}/GENERATED_APPLICATIONS/${fileName}`;
@@ -214,7 +269,8 @@ export async function archiveOfficialApplicationPdf(input: {
   if (upload.error) throw new Error(upload.error.message);
 
   const mappedDocument = mapApplicationToSapsTemplate(input.data, input.values);
-  const inserted = await db.from('documents').insert({
+  return registerGeneratedDocument({
+    ...privacy,
     dealer_id: input.dealerId,
     client_id: input.clientId,
     competency_id: null,
@@ -249,11 +305,5 @@ export async function archiveOfficialApplicationPdf(input: {
       renderer: 'LICENCEGUARD_PDF_OVERLAY_V1',
     },
     uploaded_by: input.userId,
-  }).select('*').single();
-
-  if (inserted.error) {
-    await db.storage.from(DOCUMENT_BUCKET).remove([storagePath]);
-    throw new Error(inserted.error.message);
-  }
-  return inserted.data as DocumentRecord;
+  });
 }

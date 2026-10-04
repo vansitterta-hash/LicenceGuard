@@ -65,16 +65,50 @@ function buildMotivationRecommendation(
     );
   }
 
+  const primaryPurpose = context.primaryPurpose ?? context.intendedUse;
+  if (primaryPurpose) {
+    reasons.push(
+      matchReason(
+        'primaryPurpose',
+        primaryPurpose,
+        'The applicant’s stated lawful purpose was included so the motivation remains personalised.'
+      )
+    );
+  }
+
+  if (context.sportDiscipline) {
+    reasons.push(
+      matchReason(
+        'sportDiscipline',
+        context.sportDiscipline,
+        'The specific sport discipline/category was included to keep the motivation grounded in the applicant’s actual participation.'
+      )
+    );
+  }
+
+  if (context.sportAssociation) {
+    reasons.push(
+      matchReason(
+        'sportAssociation',
+        context.sportAssociation,
+        'The relevant sporting association or authority was retained as context where it was supplied by the applicant.'
+      )
+    );
+  }
+
   return {
     id: `motivation-${context.applicationCaseId}`,
     decision: 'RECOMMENDED',
-    confidence: 'MEDIUM',
+    confidence: context.sportDiscipline ? 'HIGH' : 'MEDIUM',
     source: 'RULE_ENGINE',
-    title: 'Recommended firearm motivation',
-    description:
-      'A motivation document should be selected based on firearm details, licence section and intended use.',
+    title: context.sportDiscipline
+      ? 'Recommended firearm motivation for the stated sport discipline'
+      : 'Recommended firearm motivation',
+    description: context.sportDiscipline
+      ? 'A motivation document should be selected using the firearm, proposed lawful purpose, and the applicant’s specific sport discipline/category.'
+      : 'A motivation document should be selected based on firearm details, licence section and intended use.',
     reasons,
-    score: 50,
+    score: context.sportDiscipline ? 70 : 50,
     documentType: 'MOTIVATION',
     templateId: null,
   };

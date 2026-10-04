@@ -1,6 +1,7 @@
 import { buildApplicationAutofillPackage } from './applicationAutofillService';
 import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import { getApplicationCase } from './applicationCaseService';
+import { getClientApplicationReadiness } from './applicationReadinessService';
 import {
   prepareSuggestedApplicationDocuments,
   suggestApplicationDocuments,
@@ -50,6 +51,7 @@ export async function orchestrateApplicationPack(input: {
       applicationCaseId: input.applicationCaseId,
       suggestions: suggestions.suggestions,
       context: suggestions.context,
+      researchContext: suggestions.researchContext,
     });
   }
   completedStages.push('MATCH_DOCUMENTS');
@@ -59,7 +61,13 @@ export async function orchestrateApplicationPack(input: {
     input.applicationCaseId
   );
 
-  if (autofill.canGenerate) {
+  const readiness = await getClientApplicationReadiness(input.clientId);
+  const formRequirement = readiness.cases.find(item => item.caseId === input.applicationCaseId)?.requirements.find(item =>
+    item.documentType && ['COMPETENCY_APPLICATION', 'COMPETENCY_RENEWAL_FORM', 'FIREARM_LICENCE_APPLICATION_FORM', 'FIREARM_LICENCE_RENEWAL_FORM'].includes(item.documentType)
+  );
+  // Reuse the selected persisted form, including its review status. Compilation
+  // must not create a fresh unverified copy of a form the user already reviewed.
+  if (!formRequirement?.documentId && autofill.canGenerate) {
     await archiveOfficialApplicationPdf({
       dealerId: input.dealerId,
       clientId: input.clientId,

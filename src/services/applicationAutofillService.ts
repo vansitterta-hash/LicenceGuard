@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { declarationDataIssues, declarationReadinessIssues, saps271DeclarationFields } from '../utils/saps271Declarations';
+import { saps517ApplicantFields, saps517RequiredProfileIssues, saps517Address } from '../utils/saps517Applicant';
+import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import { getAutofillFormCode } from '../utils/applicationBetaPolicy';
 import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import {
@@ -43,11 +45,9 @@ function formLabel(code: AutofillFormCode): string {
 }
 
 function buildAddress(client: ClientRecord): string {
-  return [client.address_line_1, client.address_line_2]
-    .map(text)
-    .filter(Boolean)
-    .join(', ');
+  return [client.address_line_1, client.address_line_2].map(text).filter(Boolean).join(', ');
 }
+
 
 function validate(
   client: ClientRecord,
@@ -149,9 +149,7 @@ export async function buildApplicationAutofillPackage(
     applicationCase.firearm_licence_id
       ? supabase.from('firearm_licences').select('*').eq('id', applicationCase.firearm_licence_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    applicationCase.competency_id
-      ? supabase.from('competencies').select('*').eq('id', applicationCase.competency_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+    supabase.from('competencies').select('*').eq('client_id', clientId),
   ]);
 
   const firstError = clientResult.error ?? firearmResult.error ?? licenceResult.error ?? competencyResult.error;
@@ -160,10 +158,18 @@ export async function buildApplicationAutofillPackage(
   const client = clientResult.data as ClientRecord;
   const firearm = (firearmResult.data ?? null) as FirearmRecord | null;
   const licence = (licenceResult.data ?? null) as FirearmLicenceRecord | null;
-  const competency = (competencyResult.data ?? null) as CompetencyRecord | null;
+  const competencyCategory = applicationCase.competency_category ?? firearm?.required_competency ?? null;
+  const competency = resolveReusableCompetency(
+    (competencyResult.data ?? []) as CompetencyRecord[], competencyCategory,
+    applicationCase.competency_id, applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY'
+  );
   const issues = validate(client, applicationCase, firearm, licence, competency);
+  if (applicationCase.competency_id && !competency) {
+    issues.push({ key: 'competencyRecord', label: 'Linked competency record', message: 'The linked competency is unavailable for this client or does not match the application category. Review the application link.', severity: 'BLOCKING' });
+  }
   const code = getAutofillFormCode(applicationCase.application_type);
   const usesBackgroundQuestionnaire = ['SAPS_271', 'SAPS_517', 'SAPS_517_A'].includes(code);
+  const usesSaps517ApplicantData = code === 'SAPS_517';
   if (code === 'SAPS_271') {
     for (const [index, message] of declarationReadinessIssues(client.saps271_declarations, applicationCase.created_at).entries()) {
       issues.push({ key: `saps271Declaration.${index}`, label: 'SAPS 271 Background & Declarations', message, severity: 'BLOCKING' });
@@ -173,9 +179,22 @@ export async function buildApplicationAutofillPackage(
       issues.push({ key: `backgroundQuestionnaire.${index}`, label: 'SAPS Background Questionnaire', message, severity: 'BLOCKING' });
     }
   }
+  if (usesSaps517ApplicantData) {
+    for (const [index, message] of saps517RequiredProfileIssues(client, applicationCase.competency_category).entries()) {
+      issues.push({ key: `saps517Applicant.${index}`, label: 'SAPS 517 applicant information', message, severity: 'BLOCKING' });
+    }
+  }
 
   return {
     ...(usesBackgroundQuestionnaire ? { saps271Declarations: client.saps271_declarations ?? null, saps271DeclarationFields: saps271DeclarationFields(client.saps271_declarations) } : {}),
+    ...(usesSaps517ApplicantData ? { saps517Applicant: saps517ApplicantFields({
+      profile: client.saps271_declarations,
+      idNumber: client.id_number,
+      competencyCategory: competencyCategory ?? competency?.category ?? null,
+      residentialAddress: saps517Address(client).street,
+      residentialLocality: saps517Address(client).locality,
+      residentialPostalCode: text(client.postal_code),
+    }) } : {}),
     generatedAt: new Date().toISOString(),
     applicant: {
       fullName: `${client.first_name} ${client.surname}`.trim(),
@@ -204,9 +223,9 @@ export async function buildApplicationAutofillPackage(
           licenceExpiryDate: text(licence?.expiry_date),
         }
       : null,
-    competency: applicationCase.competency_category || competency
+    competency: competencyCategory || competency
       ? {
-          category: applicationCase.competency_category ?? competency?.category ?? null,
+          category: competencyCategory ?? competency?.category ?? null,
           certificateNumber: text(competency?.certificate_number),
           issueDate: text(competency?.issue_date),
           expiryDate: text(competency?.expiry_date),

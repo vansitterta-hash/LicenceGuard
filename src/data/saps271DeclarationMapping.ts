@@ -2,6 +2,7 @@ import type { DocumentFieldDefinition, DocumentFieldId } from '../types/document
 import type { DocumentLayoutElement } from '../types/documentLayout';
 import type { SapsTemplateField } from '../types/sapsTemplate';
 import { DECLARATION_QUESTIONS, DECLARATION_DETAIL_LABELS } from '../utils/saps271Declarations';
+import { SAPS517_ADDITIONAL_DECLARATIONS } from '../utils/saps517Applicant';
 
 export const SAPS271_DECLARATION_FIELDS: DocumentFieldDefinition[] = [];
 for (const question of DECLARATION_QUESTIONS) {
@@ -111,6 +112,27 @@ export const SAPS271_DECLARATION_ELEMENTS = createSharedDeclarationElements({
 });
 
 export const SAPS517_DECLARATION_TEMPLATE_FIELDS = createSharedDeclarationTemplateFields('SAPS 517 Background Questionnaire', [5, 6, 7, 8, 9, 10]);
+for (const question of SAPS517_ADDITIONAL_DECLARATIONS) {
+  SAPS517_DECLARATION_TEMPLATE_FIELDS.push(
+    { key: `applicant.saps517.declarations.${question.key}.answer` as SapsTemplateField['key'], label: `H${question.number}: ${question.label}`, section: 'SAPS 517 Applicant Declarations', required: true },
+    { key: `applicant.saps517.declarations.${question.key}.details` as SapsTemplateField['key'], label: `H${question.number}: Details`, section: 'SAPS 517 Applicant Declarations', required: false },
+  );
+}
+
+export const SAPS517_ADDITIONAL_DECLARATION_ELEMENTS: DocumentLayoutElement[] = [
+  ...SAPS517_ADDITIONAL_DECLARATIONS.map((question, index) => {
+    const page = question.number === 11 ? 4 : 5;
+    const yesY = question.number === 11 ? 107.34 : [772.8, 699.24, 625.68, 552.12, 488.16][question.number - 12];
+    const detailsY = question.number === 11 ? 88.8 : yesY - 18;
+    const answerId = `applicant.saps517.declarations.${question.key}.answer` as DocumentFieldId;
+    return [
+      { id: `s517-h${question.number}-yes`, kind: 'CHECKBOX' as const, fieldId: answerId, page, x: 128, y: yesY, fontSize: 9, choiceValue: 'YES', mark: 'X' },
+      { id: `s517-h${question.number}-no`, kind: 'CHECKBOX' as const, fieldId: answerId, page, x: 224, y: yesY, fontSize: 9, choiceValue: 'NO', mark: 'X' },
+      { id: `s517-h${question.number}-details`, kind: 'TEXT' as const, fieldId: `applicant.saps517.declarations.${question.key}.details` as DocumentFieldId, page, x: 126, y: detailsY, width: 430, fontSize: 7, maxLines: 1 },
+    ];
+  }).flat(),
+];
+
 export const SAPS517_DECLARATION_ELEMENTS = createSharedDeclarationElements({
   prefix: 's517',
   positions: [

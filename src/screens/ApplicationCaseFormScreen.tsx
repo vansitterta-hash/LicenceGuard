@@ -129,6 +129,9 @@ const EMPTY_FORM: ApplicationCaseFormValues = {
   supplierContact: '',
   supplierLicenceNumber: '',
   saleOrInvoiceReference: '',
+  primaryPurpose: '',
+  sportDiscipline: '',
+  sportAssociation: '',
   motivationSummary: '',
   openedDate: today(),
   targetSubmissionDate: '',
@@ -201,6 +204,9 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
           supplierContact: item.supplier_contact ?? '',
           supplierLicenceNumber: item.supplier_licence_number ?? '',
           saleOrInvoiceReference: item.sale_or_invoice_reference ?? '',
+          primaryPurpose: item.primary_purpose ?? '',
+          sportDiscipline: item.sport_discipline ?? '',
+          sportAssociation: item.sport_association ?? '',
           motivationSummary: item.motivation_summary ?? '',
           openedDate: item.opened_date,
           targetSubmissionDate: item.target_submission_date ?? '',
@@ -505,13 +511,17 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         </Card>
       ) : null}
 
-      {newFirearmApplication ? (
-        <Card title="Application details" subtitle="These are the only application-specific details LicenceGuard cannot safely infer.">
-          <Text style={styles.fieldLabel}>Purchase source</Text>
-          <View style={styles.choiceRow}>
-            <Choice label="Dealer" icon={<Building2 color={values.acquisitionSource === 'DEALER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'DEALER'} onPress={() => setField('acquisitionSource', 'DEALER')} />
-            <Choice label="Private sale" icon={<UserRound color={values.acquisitionSource === 'PRIVATE_SELLER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'PRIVATE_SELLER'} onPress={() => setField('acquisitionSource', 'PRIVATE_SELLER')} />
-          </View>
+      {firearmApplication ? (
+        <Card title="Purpose and application details" subtitle="Record the applicant’s lawful purpose and the firearm-specific facts that support it.">
+          {newFirearmApplication ? (
+            <>
+              <Text style={styles.fieldLabel}>Purchase source</Text>
+              <View style={styles.choiceRow}>
+                <Choice label="Dealer" icon={<Building2 color={values.acquisitionSource === 'DEALER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'DEALER'} onPress={() => setField('acquisitionSource', 'DEALER')} />
+                <Choice label="Private sale" icon={<UserRound color={values.acquisitionSource === 'PRIVATE_SELLER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'PRIVATE_SELLER'} onPress={() => setField('acquisitionSource', 'PRIVATE_SELLER')} />
+              </View>
+            </>
+          ) : null}
 
           <Text style={styles.fieldLabel}>Licence section</Text>
           <View style={styles.optionList}>
@@ -526,17 +536,45 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
           <Text style={styles.fieldLabel}>Purpose</Text>
           <View style={styles.purposeWrap}>
             {PURPOSE_SUGGESTIONS.map((purpose) => (
-              <Pressable key={purpose} onPress={() => setField('motivationSummary', purpose)} style={({ pressed }) => [styles.purposeChip, values.motivationSummary === purpose ? styles.purposeChipSelected : null, pressed ? styles.pressed : null]}>
-                <Text style={[styles.purposeText, values.motivationSummary === purpose ? styles.purposeTextSelected : null]}>{purpose}</Text>
+              <Pressable key={purpose} onPress={() => setField('primaryPurpose', purpose)} style={({ pressed }) => [styles.purposeChip, values.primaryPurpose === purpose ? styles.purposeChipSelected : null, pressed ? styles.pressed : null]}>
+                <Text style={[styles.purposeText, values.primaryPurpose === purpose ? styles.purposeTextSelected : null]}>{purpose}</Text>
               </Pressable>
             ))}
           </View>
 
-          <TextField label={values.acquisitionSource === 'PRIVATE_SELLER' ? 'Seller name' : 'Dealer name'} value={values.supplierName} onChangeText={(value) => setField('supplierName', value)} placeholder="Optional if already contained in the uploaded sale document" />
-          <TextField label="ID or registration number" value={values.supplierIdOrRegistration} onChangeText={(value) => setField('supplierIdOrRegistration', value)} />
-          <TextField label="Contact number" value={values.supplierContact} onChangeText={(value) => setField('supplierContact', value)} />
-          <TextField label="Dealer or seller licence number" value={values.supplierLicenceNumber} onChangeText={(value) => setField('supplierLicenceNumber', value)} />
-          <TextField label="Invoice or sale reference" value={values.saleOrInvoiceReference} onChangeText={(value) => setField('saleOrInvoiceReference', value)} placeholder="Optional" />
+          {(values.licenceSection === '15' || values.licenceSection === '16') && (
+            <TextField
+              label="Specific sport discipline / category"
+              value={values.sportDiscipline}
+              onChangeText={(value) => setField('sportDiscipline', value)}
+              placeholder="e.g. Trap, Skeet, Sporting Clays, IPSC"
+            />
+          )}
+          {(values.licenceSection === '15' || values.licenceSection === '16') ? (
+            <TextField
+              label="Sport association / authority"
+              value={values.sportAssociation}
+              onChangeText={(value) => setField('sportAssociation', value)}
+              placeholder="Association or governing body"
+            />
+          ) : null}
+          <TextField
+            label="Applicant-specific purpose and participation facts"
+            value={values.motivationSummary}
+            onChangeText={(value) => setField('motivationSummary', value)}
+            placeholder="Record the applicant's own experience, participation, and reasons for this firearm."
+            multiline
+          />
+
+          {newFirearmApplication ? (
+            <>
+              <TextField label={values.acquisitionSource === 'PRIVATE_SELLER' ? 'Seller name' : 'Dealer name'} value={values.supplierName} onChangeText={(value) => setField('supplierName', value)} placeholder="Optional if already contained in the uploaded sale document" />
+              <TextField label="ID or registration number" value={values.supplierIdOrRegistration} onChangeText={(value) => setField('supplierIdOrRegistration', value)} />
+              <TextField label="Contact number" value={values.supplierContact} onChangeText={(value) => setField('supplierContact', value)} />
+              <TextField label="Dealer or seller licence number" value={values.supplierLicenceNumber} onChangeText={(value) => setField('supplierLicenceNumber', value)} />
+              <TextField label="Invoice or sale reference" value={values.saleOrInvoiceReference} onChangeText={(value) => setField('saleOrInvoiceReference', value)} placeholder="Optional" />
+            </>
+          ) : null}
         </Card>
       ) : null}
 

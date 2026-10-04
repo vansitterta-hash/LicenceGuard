@@ -59,6 +59,14 @@ export type ApplicationIntelligenceContext = {
 
   competencyCategory: CompetencyCategory | null;
 
+  intendedUse?: string | null;
+
+  primaryPurpose?: string | null;
+
+  sportDiscipline?: string | null;
+
+  sportAssociation?: string | null;
+
   firearm: {
     id: string;
     make: string;

@@ -14,6 +14,8 @@ const requireForReadiness = (id) => {
   if (id === './documentService') return loader({ '../lib/supabase': { supabase: db } })('src/services/documentService.ts');
   if (id === '../utils/unsupportedApplicationTypePolicy') return loader()('src/utils/unsupportedApplicationTypePolicy.ts');
   if (id === '../utils/saps271Declarations') return loader()('src/utils/saps271Declarations.ts');
+  if (id === '../utils/saps517Applicant') return loader()('src/utils/saps517Applicant.ts');
+  if (id === '../utils/reusableCompetency') return loader()('src/utils/reusableCompetency.ts');
   if (id === '../types/applicationCase') return loader()('src/types/applicationCase.ts');
   throw new Error(`Unexpected dependency: ${id}`);
 };

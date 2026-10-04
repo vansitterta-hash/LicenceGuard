@@ -1,3 +1,4 @@
+import { complete517Data } from './saps517-test-fixture.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -94,13 +95,15 @@ try {
   assert.ok(idDigits[10].x - idDigits[9].x > idDigits[9].x - idDigits[8].x, 'second printed ID separator must remain unused');
   assert.ok(idDigits[12].x - idDigits[11].x > idDigits[11].x - idDigits[10].x, 'third printed ID separator must remain unused');
 
-  const postalDigits = draws.filter((draw) => draw.page === 2 && draw.y === 482 && draw.x >= 486);
+  const postalDigits = draws.filter((draw) => draw.page === 2 && draw.y === 482 && draw.x >= 483.6);
   assert.equal(postalDigits.map((draw) => draw.value).join(''), '0001');
   assert.ok(postalDigits.every((draw) => draw.value.length === 1));
 
   assert.ok(!draws.some((draw) => ['INTERNAL-REFERENCE', '2026-09-13'].includes(draw.value)), 'protected official-use values must not render');
-  assert.ok(draws.some((draw) => draw.page === 1 && draw.value === 'KwaZulu-Natal'));
-  assert.ok(draws.some((draw) => draw.page === 1 && draw.value === 'Camperdown'));
+  assert.ok(!draws.some((draw) => draw.page === 1 && ['KwaZulu-Natal', 'Camperdown'].includes(draw.value)), 'SAPS-only routing fields must stay blank');
+  assert.ok(!layouts.find((layout) => layout.templateCode === 'SAPS_517').elements.some((element) => /saps.?86|register-reference|date-received/i.test(`${element.id} ${element.fieldId}`)));
+  const s517OfficialRouting = layouts.find((layout) => layout.templateCode === 'SAPS_517').elements.filter((element) => ['s517-province', 's517-police-station'].includes(element.id));
+  assert.equal(s517OfficialRouting.length, 0, 'official-use mappings removed entirely');
   assert.ok(draws.some((draw) => draw.page === 2 && draw.value === 'andre@example.test' && draw.x >= 162));
   assert.ok(draws.some((draw) => draw.page === 6 && draw.value === 'ANDRÉ VAN SITTERT' && draw.x >= 46 && draw.x + 17 * 4 <= 217));
   assert.ok(draws.some((draw) => draw.page === 2 && draw.value === 'X' && draw.x === 184), 'Handgun mapping must remain intact');
@@ -139,10 +142,21 @@ try {
 
   for (const code of ['SAPS_517', 'SAPS_517_A', 'SAPS_517_G', 'SAPS_518_A']) {
     const layout = layouts.find((item) => item.templateCode === code);
+    if (code === 'SAPS_517') {
+      assert.ok(!layout.elements.some((item) => item.page === 1), 'SAPS 517 official-use page has no mappings');
+      continue;
+    }
     assert.ok(layout.elements.find((item) => item.id.endsWith('application-reference'))?.autofillPolicy === 'PROTECTED_OFFICIAL');
     assert.ok(layout.elements.find((item) => item.id.endsWith('opened-date'))?.autofillPolicy === 'PROTECTED_OFFICIAL');
-    assert.ok(layout.elements.find((item) => item.id.endsWith('province'))?.autofillPolicy === 'ROUTING');
-    assert.ok(layout.elements.find((item) => item.id.endsWith('police-station'))?.autofillPolicy === 'ROUTING');
+    const province = layout.elements.find((item) => item.id.endsWith('province'));
+    const station = layout.elements.find((item) => item.id.endsWith('police-station'));
+    if (code === 'SAPS_517') {
+      assert.equal(province?.autofillPolicy, 'PROTECTED_OFFICIAL');
+      assert.equal(station?.autofillPolicy, 'PROTECTED_OFFICIAL');
+    } else {
+      assert.equal(province?.autofillPolicy, 'ROUTING');
+      assert.equal(station?.autofillPolicy, 'ROUTING');
+    }
   }
   assert.ok(!layouts.some((layout) => layout.elements.some((element) => /saps.?86|register-reference|date-received/i.test(element.id))));
 } finally {
@@ -156,6 +170,7 @@ globalThis.fetch = async (url) => new Response(readFileSync(`public${url}`), { h
 try {
   for (const code of ['SAPS_517', 'SAPS_517_A', 'SAPS_517_G', 'SAPS_518_A']) {
     const data = dataFor(code);
+    if (code === 'SAPS_517') complete517Data(data);
     const bytes = await service.generateOfficialApplicationPdf(data, service.createReviewValues(data));
     assert.equal(Buffer.from(bytes).subarray(0, 5).toString(), '%PDF-');
     writeFileSync(join(artifactDirectory, `${code}_spatial_regression.pdf`), bytes);

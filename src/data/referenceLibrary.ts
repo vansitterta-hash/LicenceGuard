@@ -12,6 +12,15 @@ export type ReferenceLibraryItem = {
   tags: string[];
   source: string;
   status: string;
+  sourceTitle?: string | null;
+  sourcePublisher?: string | null;
+  sourceUrl?: string | null;
+  retrievalDate?: string | null;
+  discipline?: string | null;
+  association?: string | null;
+  summary?: string | null;
+  applicability?: string | null;
+  trustLevel?: 'DIRECT' | 'PRIVATE_REVIEWED' | 'PUBLIC_REVIEWED' | 'UNREVIEWED';
 };
 
 export const REFERENCE_LIBRARY_ITEMS: ReferenceLibraryItem[] = [

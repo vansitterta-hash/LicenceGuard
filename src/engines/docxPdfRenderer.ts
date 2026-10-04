@@ -60,7 +60,7 @@ export async function renderDocxAsPdf(docxBytes: Uint8Array): Promise<Uint8Array
     const [{ renderAsync }, html2canvasModule, pdfLib] = await Promise.all([
       import('docx-preview'),
       import('html2canvas'),
-      import('pdf-lib'),
+      import('pdf-lib/cjs/index.js'),
     ]);
     await renderAsync(docxBytes.buffer as ArrayBuffer, host, undefined, {
       breakPages: true,
