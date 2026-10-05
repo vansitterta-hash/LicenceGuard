@@ -145,4 +145,60 @@ assert.equal(nodes(harness.tree).find((node) => node.props?.title === 'Confirm d
 const sql = readFileSync('supabase/migrations/20260913_client_saps271_declarations.sql', 'utf8');
 assert.match(sql, /add column if not exists saps271_declarations jsonb/);
 assert.doesNotMatch(sql, /\b(update|delete|insert|create policy|drop policy)\b/i);
-console.log('R09 passed: existing profiles, persistence, tri-state answers, YES details, confirmation/new-case review, SAPS 271 mappings and checkbox rendering, overflow blocking, zero-write readiness, reusable documents, and unrelated application types.');
+// Existing application editor -> canonical JSON save -> fresh readiness/AutoFill.
+applicationCase.application_type = 'FIREARM_LICENCE_FIRST_APPLICATION';
+Object.assign(applicationCase, { dealer_id: 'dealer-test', status: 'NOT_STARTED', firearm_id: 'owned', licence_section: '13', acquisition_source: 'EXISTING_FIREARM' });
+Object.assign(client, { dealer_id: 'dealer-test', saps271_declarations: { ...yes, confirmedAt: null, applications: { other: { licenceTermConfirmed: 'preserve' } } } });
+rows.firearms = [{ id:'owned',client_id:client.id,is_active:true,make:'Example',calibre:'12 gauge',serial_number:'TEST',required_competency:'SHOTGUN',firearm_type:'SHOTGUN' }];
+rows.competencies = [{id:'competency',client_id:client.id,category:'SHOTGUN',certificate_number:'CERT',issue_date:'2020-01-01',verified:true}];
+const persistDb = { auth: { getUser:async()=>({data:{user:{id:'user-test'}},error:null}) }, from(table) {
+  let payload, single=false;const filters=[];
+  const q={select(){return q;},order(){return q;},not(){return q;},single(){single=true;return q;},maybeSingle(){single=true;return q;},
+    eq(k,v){filters.push(r=>k==='saps271_declarations'?JSON.stringify(r[k])===v:r[k]===v);return q;},
+    is(k,v){filters.push(r=>r[k]==v);return q;},update(value){payload=value;return q;},
+    then(resolve,reject){const source=Array.isArray(rows[table])?rows[table]:[rows[table]];const selected=source.filter(r=>filters.every(f=>f(r)));if(payload)selected.forEach(r=>Object.assign(r,structuredClone(payload)));return Promise.resolve({data:structuredClone(single?selected[0]:selected),error:null}).then(resolve,reject);},
+  };return q;
+} };
+const persistedLoad=loader({'../lib/supabase':{supabase:persistDb}});
+const answerService=persistedLoad('src/services/applicationFormAnswerService.ts');
+const editorHarness=hookHarness();
+const Editor=loader({react:editorHarness.react,'react-native':nativeMock,'../Card':'Card','../Button':'Button','../TextField':'TextField','./Saps271DeclarationsSection':'Declarations','../../services/applicationFormAnswerService':answerService})('src/components/client/ApplicationFormQuestions.tsx').default;
+editorHarness.mount(Editor,{application:applicationCase,profile:client.saps271_declarations,idNumber:client.id_number,competencies:rows.competencies,dealerId:'dealer-test',clientId:client.id,userId:'user-test',onSaved:()=>{}});
+await editorHarness.settle();
+const declarationEditor=nodes(editorHarness.tree).find(n=>n.type==='Declarations');
+assert.ok(declarationEditor,'The source application editor must expose the actual 271 declaration review');
+declarationEditor.props.onConfirm({...client.saps271_declarations,confirmedAt:new Date().toISOString()});
+await editorHarness.settle();
+assert.deepEqual(client.saps271_declarations.answers,yes.answers,'YES details survive the actual application answer service');
+assert.equal(client.saps271_declarations.applications.other.licenceTermConfirmed,'preserve');
+const reloadedReadiness=await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id);
+assert.equal(reloadedReadiness.cases[0].requirements.find(r=>r.key==='SAPS271_DECLARATIONS').state,'SATISFIED');
+const reloadedAutofill=await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id);
+assert.equal(reloadedAutofill.issues.some(i=>i.key.startsWith('saps271Declaration.')),false);
+assert.equal(reloadedAutofill.canGenerate,true);
+const savedPurpose = { primary_purpose:'Dedicated sport shooting', sport_discipline:'Trap', licence_section:'16' };
+Object.assign(applicationCase,savedPurpose);
+for (const context of ['PRIVATE_SELLER','DEALER','EXISTING_FIREARM']) {
+  applicationCase.acquisition_source=context;
+  const result=await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id);
+  const evidence=result.cases[0].requirements.find(r=>r.key==='ACQUISITION_EVIDENCE');
+  if(context==='EXISTING_FIREARM')assert.equal(evidence,undefined);
+  else {assert.equal(evidence.required,true);assert.equal(evidence.state,'MISSING');}
+  const filled=await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id);
+  assert.equal(filled.supplier===null,context==='EXISTING_FIREARM');
+  for(const [key,value] of Object.entries(savedPurpose))assert.equal(applicationCase[key],value);
+}
+const licence={id:'existing-licence',client_id:client.id,firearm_id:'owned',licence_section:'13',licence_number:'TEST',issue_date:'2020-01-01',expiry_date:'2026-01-01'};
+rows.firearm_licences=[licence];applicationCase.firearm_licence_id=licence.id;
+const termKey=persistedLoad('src/utils/applicationFormAnswers.ts').licenceTermKey(licence);
+await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{licenceTermConfirmed:termKey}});
+assert.equal(client.saps271_declarations.applications[applicationCase.id].licenceTermConfirmed,termKey);
+assert.equal((await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id)).cases[0].requirements.find(r=>r.key==='APPLICATION_FORM_ANSWERS').state,'SATISFIED');
+assert.equal((await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id)).canGenerate,true);
+const missing=structuredClone(client.saps271_declarations);missing.answers.convictions.answer=null;
+await assert.rejects(answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{},declarations:missing}),/Answer the declaration/);
+await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{},declarations:{...missing,confirmedAt:null}});
+assert.equal(client.saps271_declarations.answers.convictions.answer,null);
+assert.equal((await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id)).canGenerate,false);
+editorHarness.unmount();
+console.log('R09 passed: existing application editor confirmation persists canonical answers and YES details; fresh readiness and AutoFill clear the blocker and allow generation; unknowns stay blocked; existing declaration/mapping regressions pass.');

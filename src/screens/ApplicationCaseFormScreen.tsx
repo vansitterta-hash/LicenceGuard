@@ -528,7 +528,8 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
         <Card title="Purpose and application details" subtitle="Record the applicant’s lawful purpose and the firearm-specific facts that support it.">
           {newFirearmApplication ? (
             <>
-              <Text style={styles.fieldLabel}>Purchase source</Text>
+              <Text style={styles.fieldLabel}>Acquisition context</Text>
+              <Text style={styles.muted}>For a firearm you already own and are not buying, select Already owned / existing firearm. Dealer and Private sale apply only to an actual acquisition.</Text>
               <View style={styles.choiceRow}>
                 <Choice label="Dealer" icon={<Building2 color={values.acquisitionSource === 'DEALER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'DEALER'} onPress={() => setField('acquisitionSource', 'DEALER')} />
                 <Choice label="Private sale" icon={<UserRound color={values.acquisitionSource === 'PRIVATE_SELLER' ? Colors.white : Colors.silver} size={17} />} selected={values.acquisitionSource === 'PRIVATE_SELLER'} onPress={() => setField('acquisitionSource', 'PRIVATE_SELLER')} />

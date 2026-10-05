@@ -182,7 +182,7 @@ const REGISTRY: Record<AutofillFormCode, SapsTemplateDefinition> = {
     applicationTypes: ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'],
     documentType: 'FIREARM_LICENCE_APPLICATION_FORM',
     sourceAuthority: 'South African Police Service',
-    sourceUrl: 'https://www.saps.gov.za/services/flash/firearms/forms/english/e271.pdf',
+    sourceUrl: '/saps-templates/SAPS_271_EN_OFFICIAL.pdf',
     instructionsUrl: 'https://www.saps.gov.za/services/flash/firearms/forms/english/ei271.pdf',
     versionLabel: 'Official SAPS English template',
     fields: SAPS_271_FIELDS,

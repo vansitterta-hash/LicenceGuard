@@ -14,7 +14,7 @@ export const DOCUMENT_LAYOUT_DEFINITIONS: DocumentLayoutDefinition[] = [
     language: 'en',
     pageCount: 12,
     sourceAuthority: 'South African Police Service',
-    sourceUrl: 'https://www.saps.gov.za/services/flash/firearms/forms/english/e271.pdf',
+    sourceUrl: '/saps-templates/SAPS_271_EN_OFFICIAL.pdf',
     effectiveFrom: null,
     effectiveTo: null,
     status: 'ACTIVE',

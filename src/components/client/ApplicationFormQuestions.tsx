@@ -7,6 +7,8 @@ import { Colors } from '../../theme/colors';
 import { applicationFormAnswers, evaluateApplicationForm, FURTHER_CATEGORIES, licenceTermKey, licenceTermNeedsReview, type ApplicationFormAnswers, type FormCase, type FormCompetency, type FormLicence } from '../../utils/applicationFormAnswers';
 import { saveApplicationFormAnswers } from '../../services/applicationFormAnswerService';
 import type { Saps271Declarations } from '../../types/saps271Declarations';
+import Saps271DeclarationsSection from './Saps271DeclarationsSection';
+import { emptySaps271Declarations } from '../../utils/saps271Declarations';
 
 export default function ApplicationFormQuestions(props: {
   application: FormCase; profile?: Saps271Declarations | null; idNumber: string;
@@ -18,14 +20,16 @@ export default function ApplicationFormQuestions(props: {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [declarations, setDeclarations] = useState(() => props.profile ?? emptySaps271Declarations());
+  const saps271 = ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(props.application.application_type);
   const further = props.application.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY';
   const renewal = props.application.application_type === 'COMPETENCY_RENEWAL';
   const firearmRenewal = props.application.application_type === 'FIREARM_LICENCE_RENEWAL';
   const evaluation = evaluateApplicationForm({ ...props, profile: { answers: props.profile?.answers ?? {} as Saps271Declarations['answers'], confirmedAt: props.profile?.confirmedAt ?? null, ...props.profile, applications: { ...props.profile?.applications, [props.application.id]: answers } } });
   const update = (patch: Partial<ApplicationFormAnswers>) => { setAnswers(a => ({ ...a, ...patch })); setDirty(true); setMessage('Unsaved answers'); };
-  const save = async () => {
+  const save = async (confirmedDeclarations = declarations) => {
     setSaving(true);
-    try { const profile = await saveApplicationFormAnswers({ ...props, caseId: props.application.id, answers }); props.onSaved(profile); setDirty(false); setMessage('Applicant answers saved'); }
+    try { const profile = await saveApplicationFormAnswers({ ...props, caseId: props.application.id, answers, ...(saps271 ? { declarations: confirmedDeclarations } : {}) }); props.onSaved(profile); setDirty(false); setMessage('Applicant answers saved'); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to save applicant answers'); throw error; }
     finally { setSaving(false); }
   };
@@ -35,6 +39,9 @@ export default function ApplicationFormQuestions(props: {
   });
   const selected = answers.furtherCategories ?? (props.application.competency_category ? [props.application.competency_category] : []);
   return <Card title="Application form answers" subtitle="Save these answers for this application. Existing profile declarations and certificate facts are reused.">
+    {saps271 ? <Saps271DeclarationsSection value={declarations} disabled={saving}
+      onChange={value => { setDeclarations(value); setDirty(true); setMessage('Unsaved answers'); }}
+      onConfirm={value => { setDeclarations(value); setDirty(true); void save(value).catch(() => undefined); }} /> : null}
     {further ? <>
       <Text style={{ color: Colors.text }}>Further competency categories (select all that apply to the printed form)</Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>{FURTHER_CATEGORIES.map(category => <Button key={category} title={`${selected.includes(category) ? '✓ ' : ''}${category}`} disabled={saving} onPress={() => update({ furtherCategories: selected.includes(category) ? selected.filter(c => c !== category) : [...selected, category] })} />)}</View>
