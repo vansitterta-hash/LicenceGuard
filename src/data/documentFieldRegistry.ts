@@ -1,3 +1,4 @@
+import { SAPS271_PHYSICAL_FIELDS } from './saps271PhysicalMapping';
 import type { DocumentFieldDefinition, DocumentFieldId } from '../types/documentEngine';
 import { SAPS271_DECLARATION_FIELDS } from './saps271DeclarationMapping';
 import { SAPS517_ADDITIONAL_DECLARATIONS } from '../utils/saps517Applicant';
@@ -43,6 +44,7 @@ const SAPS517_APPLICANT_FIELDS: DocumentFieldDefinition[] = [
 ];
 
 const FIELDS: DocumentFieldDefinition[] = [
+  ...SAPS271_PHYSICAL_FIELDS,
   ...['identificationType', 'furtherCategories', 'furtherHANDGUN', 'furtherRIFLE', 'furtherSHOTGUN', 'previousCategory', 'previousNumber', 'previousIssueDate', 'previousExpiryDate', 'associationMember', 'associationName', 'associationNumber', 'associationJoined', 'before90', 'beforeExpiry', 'afterExpiry', 'before90Reason', 'beforeExpiryReason', 'afterExpiryReason'].map(key => ({ id: `application.form.${key}` as DocumentFieldId, label: key, dataType: 'TEXT' as const, sourcePath: `data.formFields.${key}`, normalise: 'TRIM' as const })),
   ...SAPS271_DECLARATION_FIELDS,
   ...SAPS517_APPLICANT_FIELDS,

@@ -1,4 +1,5 @@
 import { getDocumentFieldDefinition } from '../data/documentFieldRegistry';
+import { saps271PhysicalValues } from '../data/saps271PhysicalMapping';
 import type { DocumentEngineContext, DocumentFieldDefinition, DocumentTemplateDefinition, ResolvedDocument } from '../types/documentEngine';
 
 function readPath(root: unknown, path: string): unknown {
@@ -20,6 +21,9 @@ function normalise(value: unknown, field: DocumentFieldDefinition): string {
 }
 
 export function resolveDocumentField(fieldId: DocumentFieldDefinition['id'], context: DocumentEngineContext): string {
+  if (fieldId.startsWith('application.saps271.')) {
+    return saps271PhysicalValues(context)[fieldId.slice('application.saps271.'.length)] ?? '';
+  }
   const definition = getDocumentFieldDefinition(fieldId);
   return normalise(readPath({ data: context.data, review: context.reviewValues }, definition.sourcePath), definition);
 }
