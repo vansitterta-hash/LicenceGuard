@@ -454,9 +454,9 @@ export default function ApplicationCaseFormScreen({ navigation, route }: Props) 
       {route.params.applicationCaseId && values.applicationType !== 'COMPETENCY_FIRST_APPLICATION' && values.applicationType !== 'COMPETENCY_REAPPLICATION' ? <ApplicationFormQuestions
           saveRef={formAnswersSaveRef}
         key={route.params.applicationCaseId}
-        application={{ id: route.params.applicationCaseId, application_type: values.applicationType, competency_category: values.competencyCategory, competency_id: values.competencyId, licence_section: values.licenceSection, actual_submission_date: values.actualSubmissionDate, target_submission_date: values.targetSubmissionDate }}
+        application={{ id: route.params.applicationCaseId, application_type: values.applicationType, competency_category: values.competencyCategory, competency_id: values.competencyId, licence_section: values.licenceSection, actual_submission_date: values.actualSubmissionDate, target_submission_date: values.targetSubmissionDate, firearm_id: values.firearmId, primary_purpose: values.primaryPurpose, sport_discipline: values.sportDiscipline, sport_association: values.sportAssociation }}
         profile={data.client.saps271_declarations} idNumber={data.client.id_number}
-        competencies={data.competencies} competency={selectedCompetency} licence={selectedFirearm?.licence}
+        competencies={data.competencies} competency={selectedCompetency} licence={selectedFirearm?.licence} firearm={selectedFirearm}
         dealerId={dealerProfile?.dealerId ?? ''} clientId={data.client.id} userId={user?.id ?? ''}
         onSaved={profile => setData(current => current ? { ...current, client: { ...current.client, saps271_declarations: profile } } : current)}
       /> : null}

@@ -13,6 +13,7 @@ import { emptySaps271Declarations } from '../../utils/saps271Declarations';
 export default function ApplicationFormQuestions(props: {
   application: FormCase; profile?: Saps271Declarations | null; idNumber: string;
   competencies: FormCompetency[]; competency?: FormCompetency | null; licence?: FormLicence | null;
+  firearm?: { id: string; model?: string | null; serial_number?: string | null } | null;
   dealerId: string; clientId: string; userId: string; onSaved: (profile: Saps271Declarations) => void;
   saveRef?: { current: (() => Promise<void>) | null };
 }) {
@@ -38,10 +39,45 @@ export default function ApplicationFormQuestions(props: {
     return () => { if (props.saveRef) props.saveRef.current = null; };
   });
   const selected = answers.furtherCategories ?? (props.application.competency_category ? [props.application.competency_category] : []);
+  const firearmAnswers = answers.saps271Firearm?.firearmId === props.firearm?.id ? answers.saps271Firearm : undefined;
+  const updateFirearm = (patch: Partial<NonNullable<ApplicationFormAnswers['saps271Firearm']>>) => {
+    if (props.firearm) update({ saps271Firearm: { ...firearmAnswers, ...patch, firearmId: props.firearm.id } });
+  };
   return <Card title="Application form answers" subtitle="Save these answers for this application. Existing profile declarations and certificate facts are reused.">
     {saps271 ? <Saps271DeclarationsSection value={declarations} disabled={saving}
       onChange={value => { setDeclarations(value); setDirty(true); setMessage('Unsaved answers'); }}
       onConfirm={value => { setDeclarations(value); setDirty(true); void save(value).catch(() => undefined); }} /> : null}
+    {saps271 ? <>
+      <Text style={{ color: Colors.text }}>SAPS 271 firearm details for serial {props.firearm?.serial_number || 'not selected'}. Model: {props.firearm?.model || 'missing — enter it using Edit firearm'}. Enter only information verified on this firearm.</Text>
+      {!props.firearm?.model?.trim() ? <Button disabled={saving || !props.firearm} title={firearmAnswers?.modelNotMarked ? 'No model marked/applicable confirmed' : 'Confirm no model is marked/applicable'} onPress={() => updateFirearm({ modelNotMarked: !firearmAnswers?.modelNotMarked })} /> : null}
+      <Text style={{ color: Colors.text }}>Explicit firearm action</Text>
+      {(['MANUAL','SEMI_AUTOMATIC','AUTOMATIC','OTHER'] as const).map(action => <Button key={action} disabled={saving || !props.firearm} title={`${firearmAnswers?.action === action ? '✓ ' : ''}${action.replaceAll('_',' ')}`} onPress={() => updateFirearm({action})} />)}
+      {firearmAnswers?.action === 'OTHER' ? <TextField label="Other action (as recorded on firearm)" value={firearmAnswers.otherAction ?? ''} onChangeText={otherAction=>updateFirearm({otherAction})} /> : null}
+      <Text style={{ color: Colors.text }}>Enter serials only for the components actually bearing them. Leave other components blank; do not copy the generic serial without identifying its component.</Text>
+      {(['barrelSerial','frameSerial','receiverSerial'] as const).map(key=><TextField key={key} label={`${key.replace('Serial','')} serial number`} value={firearmAnswers?.[key] ?? ''} onChangeText={value=>updateFirearm({[key]:value})} />)}
+      {['16','17','19'].includes((props.application.licence_section ?? '').replace(/\D/g,'')) ? <>
+        <Text style={{ color: Colors.text }}>G55. Are you a member of an accredited association?</Text>
+        {(['YES','NO'] as const).map(value=><Button key={value} disabled={saving} title={`${answers.associationMember===value?'✓ ':''}${value}`} onPress={()=>update({associationMember:value})} />)}
+        {answers.associationMember === 'YES' ? <>
+          {props.application.sport_association?.trim() ? <Text style={{ color: Colors.text }}>Accredited association: {props.application.sport_association}</Text> : <TextField label="Accredited association name" value={answers.associationName ?? ''} onChangeText={associationName=>update({associationName})} />}
+          <TextField label="Association FAR/accreditation number" value={answers.associationFar ?? ''} onChangeText={associationFar=>update({associationFar})} />
+          <TextField label="Association membership number" value={answers.associationNumber ?? ''} onChangeText={associationNumber=>update({associationNumber})} />
+          <TextField label="Association joining date (YYYY-MM-DD)" value={answers.associationJoined ?? ''} onChangeText={associationJoined=>update({associationJoined})} />
+          {!answers.associationNoExpiry ? <TextField label="Membership expiry (YYYY-MM-DD)" value={answers.associationExpiry ?? ''} onChangeText={associationExpiry=>update({associationExpiry})} /> : null}
+          <Button disabled={saving} title={`${answers.associationNoExpiry?'✓ ':''}No membership expiry applies`} onPress={()=>update({associationNoExpiry:!answers.associationNoExpiry})} />
+        </> : null}
+      </> : null}
+      <Text style={{ color: Colors.text }}>Purpose printed on SAPS 271: {evaluation.fields.saps271Purpose || 'Missing — enter primary purpose and discipline in this application.'}</Text>
+      <Text style={{ color: Colors.text }}>G68. Do you have the prescribed safe?</Text>
+      {(['YES','NO'] as const).map(value=><Button key={value} disabled={saving} title={`${answers.prescribedSafe===value?'✓ ':''}${value}`} onPress={()=>update({prescribedSafe:value})} />)}
+      {answers.prescribedSafe === 'YES' ? <>
+        {(['HANDGUN','RIFLE','STRONGROOM','DEVICE'] as const).map(safeType=><Button key={safeType} disabled={saving} title={`${answers.safeType===safeType?'✓ ':''}${safeType}`} onPress={()=>update({safeType})} />)}
+        <TextField label="Short safe description (maximum 40 characters)" value={answers.safeDetails ?? ''} onChangeText={safeDetails=>update({safeDetails})} />
+      </> : null}
+      <Text style={{ color: Colors.text }}>G69. Is the safe mounted?</Text>
+      {(['YES','NO'] as const).map(value=><Button key={value} disabled={saving} title={`${answers.safeMounted===value?'✓ ':''}${value}`} onPress={()=>update({safeMounted:value})} />)}
+      {answers.safeMounted === 'YES' ? (['WALL','FLOOR'] as const).map(mount=><Button key={mount} disabled={saving} title={`${answers.safeMountings?.includes(mount)?'✓ ':''}${mount}`} onPress={()=>update({safeMountings:answers.safeMountings?.includes(mount)?answers.safeMountings.filter(m=>m!==mount):[...answers.safeMountings??[],mount]})} />) : null}
+    </> : null}
     {further ? <>
       <Text style={{ color: Colors.text }}>Further competency categories (select all that apply to the printed form)</Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>{FURTHER_CATEGORIES.map(category => <Button key={category} title={`${selected.includes(category) ? '✓ ' : ''}${category}`} disabled={saving} onPress={() => update({ furtherCategories: selected.includes(category) ? selected.filter(c => c !== category) : [...selected, category] })} />)}</View>

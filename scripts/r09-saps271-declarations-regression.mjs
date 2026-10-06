@@ -147,9 +147,10 @@ assert.match(sql, /add column if not exists saps271_declarations jsonb/);
 assert.doesNotMatch(sql, /\b(update|delete|insert|create policy|drop policy)\b/i);
 // Existing application editor -> canonical JSON save -> fresh readiness/AutoFill.
 applicationCase.application_type = 'FIREARM_LICENCE_FIRST_APPLICATION';
-Object.assign(applicationCase, { dealer_id: 'dealer-test', status: 'NOT_STARTED', firearm_id: 'owned', licence_section: '13', acquisition_source: 'EXISTING_FIREARM' });
-Object.assign(client, { dealer_id: 'dealer-test', saps271_declarations: { ...yes, confirmedAt: null, applications: { other: { licenceTermConfirmed: 'preserve' } } } });
-rows.firearms = [{ id:'owned',client_id:client.id,is_active:true,make:'Example',calibre:'12 gauge',serial_number:'TEST',required_competency:'SHOTGUN',firearm_type:'SHOTGUN' }];
+const physicalAnswers = {saps271Firearm:{firearmId:'owned',action:'MANUAL',receiverSerial:'TEST'},associationMember:'YES',associationName:'Test Association',associationFar:'123',associationNumber:'MEM',associationJoined:'2020-01-01',associationNoExpiry:true,prescribedSafe:'YES',safeType:'RIFLE',safeDetails:'Steel safe',safeMounted:'YES',safeMountings:['WALL']};
+Object.assign(applicationCase, { primary_purpose:'Sport shooting', sport_discipline:'Trap', dealer_id: 'dealer-test', status: 'NOT_STARTED', firearm_id: 'owned', licence_section: '13', acquisition_source: 'EXISTING_FIREARM' });
+Object.assign(client, { dealer_id: 'dealer-test', saps271_declarations: { ...yes, confirmedAt: null, applications: { [applicationCase.id]:physicalAnswers, other: { licenceTermConfirmed: 'preserve' } } } });
+rows.firearms = [{ id:'owned',client_id:client.id,is_active:true,make:'Example',model:'Stored model',calibre:'12 gauge',serial_number:'TEST',required_competency:'SHOTGUN',firearm_type:'SHOTGUN' }];
 rows.competencies = [{id:'competency',client_id:client.id,category:'SHOTGUN',certificate_number:'CERT',issue_date:'2020-01-01',verified:true}];
 const persistDb = { auth: { getUser:async()=>({data:{user:{id:'user-test'}},error:null}) }, from(table) {
   let payload, single=false;const filters=[];
@@ -163,7 +164,7 @@ const persistedLoad=loader({'../lib/supabase':{supabase:persistDb}});
 const answerService=persistedLoad('src/services/applicationFormAnswerService.ts');
 const editorHarness=hookHarness();
 const Editor=loader({react:editorHarness.react,'react-native':nativeMock,'../Card':'Card','../Button':'Button','../TextField':'TextField','./Saps271DeclarationsSection':'Declarations','../../services/applicationFormAnswerService':answerService})('src/components/client/ApplicationFormQuestions.tsx').default;
-editorHarness.mount(Editor,{application:applicationCase,profile:client.saps271_declarations,idNumber:client.id_number,competencies:rows.competencies,dealerId:'dealer-test',clientId:client.id,userId:'user-test',onSaved:()=>{}});
+editorHarness.mount(Editor,{application:applicationCase,profile:client.saps271_declarations,idNumber:client.id_number,competencies:rows.competencies,firearm:rows.firearms[0],dealerId:'dealer-test',clientId:client.id,userId:'user-test',onSaved:()=>{}});
 await editorHarness.settle();
 const declarationEditor=nodes(editorHarness.tree).find(n=>n.type==='Declarations');
 assert.ok(declarationEditor,'The source application editor must expose the actual 271 declaration review');
@@ -176,6 +177,21 @@ assert.equal(reloadedReadiness.cases[0].requirements.find(r=>r.key==='SAPS271_DE
 const reloadedAutofill=await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id);
 assert.equal(reloadedAutofill.issues.some(i=>i.key.startsWith('saps271Declaration.')),false);
 assert.equal(reloadedAutofill.canGenerate,true);
+assert.equal(reloadedAutofill.formFields.saps271Action,'MANUAL');
+assert.equal(reloadedAutofill.formFields.saps271ReceiverSerial,'TEST');
+assert.equal(reloadedAutofill.formFields.saps271SafeDetails,'Steel safe');
+assert.equal(reloadedAutofill.formFields.saps271Purpose,'Sport shooting; Trap');
+assert.deepEqual(client.saps271_declarations.applications[applicationCase.id],physicalAnswers,'New explicit answers survive the actual editor/service save');
+for (const patch of [{prescribedSafe:null},{safeMounted:null},{saps271Firearm:{firearmId:'owned',action:'MANUAL'}},{saps271Firearm:{firearmId:'different',action:'MANUAL',receiverSerial:'TEST'}}]) {
+  await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{...physicalAnswers,...patch}});
+  const fresh = await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id);
+  const readiness = (await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id)).cases[0];
+  assert.equal(fresh.canGenerate,false,'Missing/stale firearm and safe answers block generation after reload');
+  assert.equal(readiness.requirements.find(r=>r.key==='APPLICATION_FORM_ANSWERS').state,'MISSING');
+  assert.equal(readiness.readyToGenerate,false);
+  if ('prescribedSafe' in patch) assert.equal(fresh.formFields.saps271PrescribedSafe,'','NULL never becomes NO');
+}
+await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:physicalAnswers});
 const savedPurpose = { primary_purpose:'Dedicated sport shooting', sport_discipline:'Trap', licence_section:'16' };
 Object.assign(applicationCase,savedPurpose);
 for (const context of ['PRIVATE_SELLER','DEALER','EXISTING_FIREARM']) {
@@ -191,7 +207,7 @@ for (const context of ['PRIVATE_SELLER','DEALER','EXISTING_FIREARM']) {
 const licence={id:'existing-licence',client_id:client.id,firearm_id:'owned',licence_section:'13',licence_number:'TEST',issue_date:'2020-01-01',expiry_date:'2026-01-01'};
 rows.firearm_licences=[licence];applicationCase.firearm_licence_id=licence.id;
 const termKey=persistedLoad('src/utils/applicationFormAnswers.ts').licenceTermKey(licence);
-await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{licenceTermConfirmed:termKey}});
+await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{...physicalAnswers,licenceTermConfirmed:termKey}});
 assert.equal(client.saps271_declarations.applications[applicationCase.id].licenceTermConfirmed,termKey);
 assert.equal((await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id)).cases[0].requirements.find(r=>r.key==='APPLICATION_FORM_ANSWERS').state,'SATISFIED');
 assert.equal((await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id)).canGenerate,true);

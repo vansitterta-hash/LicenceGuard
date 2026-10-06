@@ -169,7 +169,7 @@ export async function buildApplicationAutofillPackage(
     issues.push({ key: 'competencyRecord', label: 'Linked competency record', message: 'The linked competency is unavailable for this client or does not match the application category. Review the application link.', severity: 'BLOCKING' });
   }
   const code = getAutofillFormCode(applicationCase.application_type);
-  const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies: competencyResult.data ?? [], competency, licence });
+  const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies: competencyResult.data ?? [], competency, licence, firearm });
   if (code !== 'SAPS_517') for (const [index, message] of form.issues.entries()) issues.push({ key: `applicationForm.${index}`, label: 'Application form answers', message, severity: 'BLOCKING' });
   const usesBackgroundQuestionnaire = ['SAPS_271', 'SAPS_517', 'SAPS_517_A'].includes(code);
   const usesSaps517ApplicantData = code === 'SAPS_517';

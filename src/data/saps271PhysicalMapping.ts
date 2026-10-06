@@ -9,13 +9,13 @@ export function saps271PhysicalValues({ data, reviewValues: review = {} }: Docum
   const profile = saps517ApplicantFields({ profile: data.saps271Declarations, idNumber: review.idNumber ?? data.applicant.idNumber, competencyCategory: data.competency?.category, residentialAddress: address.street, residentialLocality: address.locality, residentialPostalCode: review.postalCode ?? data.applicant.postalCode });
   const type = data.firearm?.firearmType;
   const firearmType = type === 'SHOTGUN' ? 'SHOTGUN' : ['PISTOL','REVOLVER'].includes(type ?? '') ? 'HANDGUN' : ['BOLT_ACTION_RIFLE','LEVER_ACTION_RIFLE','MANUAL_RIFLE','MANUAL_CARBINE','SELF_LOADING_RIFLE'].includes(type ?? '') ? 'RIFLE' : '';
-  const action = ['BOLT_ACTION_RIFLE','LEVER_ACTION_RIFLE','MANUAL_RIFLE','MANUAL_CARBINE'].includes(type ?? '') ? 'MANUAL' : type === 'SELF_LOADING_RIFLE' ? 'SEMI_AUTOMATIC' : '';
+  const action = data.formFields?.saps271Action ?? '';
   const initials = (review.firstName ?? data.applicant.firstName ?? '').trim().split(/\s+/).filter(Boolean).map(n => n[0]).join('').toUpperCase();
   const seller = data.supplier?.acquisitionSource;
   const applicable = seller === 'DEALER' || seller === 'PRIVATE_SELLER';
   const clean = (s: string | undefined) => !s || /^\s*(?:n\/?a|not applicable)\s*$/i.test(s) ? '' : s.trim();
   const profileStrings = Object.fromEntries(Object.entries(profile).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-  return { ...profileStrings, initials: initials.length <= 4 ? initials : '', firearmType, action,
+  return { ...profileStrings, ...data.formFields, initials: initials.length <= 4 ? initials : '', firearmType, action,
     competencyType: data.competency?.certificateNumber && ['HANDGUN','RIFLE','SHOTGUN','SLR'].includes(data.competency.category ?? '') ? 'POSSESS' : '',
     supplierSource: applicable ? seller! : '',
     supplierName: applicable ? clean(review.supplierName ?? data.supplier?.name) : '',
@@ -26,7 +26,8 @@ export function saps271PhysicalValues({ data, reviewValues: review = {} }: Docum
 }
 
 const keys = ['citizenship','dateOfBirth','age','gender','initials','residentialAddress','residentialLocality','postalAddress','postalLocality','postalAddressPostalCode','residenceDescription','occupation','selfEmploymentDetails','employerName','businessAddress','businessPostalCode','workTelephone','faxNumber','maritalStatus','otherMaritalStatus','firearmType','action','competencyType','supplierSource','supplierName','supplierId','supplierContact','dealerNumber'];
-export const SAPS271_PHYSICAL_FIELDS: DocumentFieldDefinition[] = keys.map(key => ({ id: `application.saps271.${key}`, label: key, dataType: 'TEXT', sourcePath: '', normalise: 'TRIM' }));
+const supplementKeys = ['OtherAction','BarrelSerial','FrameSerial','ReceiverSerial','AssociationMember','AssociationName','AssociationFar','AssociationNumber','AssociationJoined','AssociationExpiry','Purpose','PrescribedSafe','SafeType','SafeDetails','SafeMounted','MountWall','MountFloor'].map(key=>`saps271${key}`);
+export const SAPS271_PHYSICAL_FIELDS: DocumentFieldDefinition[] = [...keys,...supplementKeys].map(key => ({ id: `application.saps271.${key}`, label: key, dataType: 'TEXT', sourcePath: '', normalise: 'TRIM' }));
 const field = (key: string) => `application.saps271.${key}` as const;
 const text = (id:string, fieldId:DocumentLayoutElement['fieldId'], page:number,x:number,y:number,width:number):DocumentLayoutElement => ({id:`s271-${id}`,kind:'TEXT',fieldId,page,x,y,width,fontSize:8});
 const box = (id:string,fieldId:DocumentLayoutElement['fieldId'],page:number,x:number,y:number,choiceValue:string):DocumentLayoutElement => ({id:`s271-${id}`,kind:'CHECKBOX',fieldId,page,x,y,fontSize:9,choiceValue,mark:'X'});
@@ -42,12 +43,13 @@ export const SAPS271_PHYSICAL_ELEMENTS: DocumentLayoutElement[] = [
   ...[['13',726.48],['14',709.08],['15',691.68],['16',674.28],['17',656.88],['19',639.48]].map(([s,y])=>box(`section-${s}`,'application.section',2,538,Number(y),String(s))),
   // Section 20 has six distinct purpose rows; the generic section alone cannot select one.
   ...[['RIFLE',160],['SHOTGUN',278],['HANDGUN',414]].map(([v,x])=>box(`firearm-${v}`,field('firearmType'),2,Number(x),446,String(v))),
-  ...[['SEMI_AUTOMATIC',281],['MANUAL',548]].map(([v,x])=>box(`action-${v}`,field('action'),2,Number(x),354,String(v))),
+  ...[['SEMI_AUTOMATIC',281],['AUTOMATIC',435],['MANUAL',548]].map(([v,x])=>box(`action-${v}`,field('action'),2,Number(x),354,String(v))),
+  text('action-other',field('saps271OtherAction'),2,279,336.06,276),
   text('firearm-calibre','firearm.calibre',2,199,272.1,160),
   text('firearm-make','firearm.make',2,199,253.98,355),
   text('firearm-model','firearm.model',2,199,235.86,355),
-  // serial_number has no barrel/frame/receiver discriminator in the stored model.
-  // Do not copy it arbitrarily into a component-specific serial field.
+  // Only explicit component answers are rendered; never the generic serial.
+  ...[['BarrelSerial',199.62],['FrameSerial',181.5],['ReceiverSerial',163.38]].map(([key,y])=>text(String(key),field(`saps271${key}`),2,199,Number(y),223)),
   {...text('private-owner-name',field('supplierName'),3,125,748.56,430),conditionFieldId:field('supplierSource'),conditionValue:'PRIVATE_SELLER'},
   {...cells('private-owner-id',field('supplierId'),3,730.44,[255.12,274.20,293.28,312.36,331.44,350.52,369.60,388.68,407.76,427.44,445.92,465,484.08,503.16,522.24,541.32,560.28],[6,11,14]),conditionFieldId:field('supplierSource'),conditionValue:'PRIVATE_SELLER'},
   {...text('private-owner-contact',field('supplierContact'),3,168,621.72,190),conditionFieldId:field('supplierSource'),conditionValue:'PRIVATE_SELLER'},
@@ -77,4 +79,18 @@ export const SAPS271_PHYSICAL_ELEMENTS: DocumentLayoutElement[] = [
   text('work-phone',field('workTelephone'),6,465,215.22,90),text('applicant-cellphone','applicant.cellphone',6,164,197.1,200),text('fax',field('faxNumber'),6,465,197.1,90),text('applicant-email','applicant.email',6,164,178.98,390),
   ...[['SINGLE',127],['MARRIED',242],['DIVORCED',337],['WIDOW',452],['WIDOWER',547]].map(([v,x])=>box(`marital-${v}`,field('maritalStatus'),6,Number(x),123.9,String(v))),
   text('marital-other',field('otherMaritalStatus'),6,125,105.78,430),
+  box('association-yes',field('saps271AssociationMember'),7,337,223.02,'YES'),
+  box('association-no',field('saps271AssociationMember'),7,394,223.02,'NO'),
+  text('association-name',field('saps271AssociationName'),7,202,204.9,354),
+  {...cells('association-far',field('saps271AssociationFar'),7,186.78,[197.88,215.4,235.2,255,274.92,293.28,311.76,331.44,350.52,369.6,388.68,407.76,426.84,445.92,465,484.08,503.16,522.24,541.32,560.28]),characterSet:'ALPHANUMERIC'},
+  text('association-number',field('saps271AssociationNumber'),7,145,168.66,144),
+  cells('association-joined',field('saps271AssociationJoined'),7,168.66,[369.6,388.68,407.76,426.84,445.92,465,484.08,503.16,522.24,541.32,560.28],[4,7]),
+  cells('association-expiry',field('saps271AssociationExpiry'),7,150.54,[369.6,388.68,407.76,426.84,445.92,465,484.08,503.16,522.24,541.32,560.28],[4,7]),
+  {...text('purpose',field('saps271Purpose'),7,48,105,508),maxLines:3,lineHeight:18.12},
+  box('safe-yes',field('saps271PrescribedSafe'),9,126,738.48,'YES'),box('safe-no',field('saps271PrescribedSafe'),9,223,738.48,'NO'),
+  box('safe-handgun',field('saps271SafeType'),9,223,701.88,'HANDGUN'),box('safe-rifle',field('saps271SafeType'),9,336,701.88,'RIFLE'),
+  box('safe-strongroom',field('saps271SafeType'),9,126,683.76,'STRONGROOM'),box('safe-device',field('saps271SafeType'),9,126,665.64,'DEVICE'),
+  ...(['HANDGUN','RIFLE','STRONGROOM','DEVICE'] as const).map(type=>({...text(`safe-description-${type}`,field('saps271SafeDetails'),9,type==='HANDGUN'||type==='RIFLE'?351:142,type==='STRONGROOM'?683.76:type==='DEVICE'?665.64:701.88,type==='HANDGUN'||type==='RIFLE'?205:414),conditionFieldId:field('saps271SafeType'),conditionValue:type})),
+  box('mounted-yes',field('saps271SafeMounted'),9,126,629.04,'YES'),box('mounted-no',field('saps271SafeMounted'),9,223,629.04,'NO'),
+  box('mounted-wall',field('saps271MountWall'),9,126,592.08,'X'),box('mounted-floor',field('saps271MountFloor'),9,224,592.08,'X'),
 ];

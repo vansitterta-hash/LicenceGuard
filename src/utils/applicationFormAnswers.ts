@@ -18,11 +18,21 @@ export type ApplicationFormAnswers = {
   beforeExpiryReason?: string;
   afterExpiryReason?: string;
   licenceTermConfirmed?: string;
+  saps271Firearm?: { firearmId: string; action?: 'MANUAL' | 'SEMI_AUTOMATIC' | 'AUTOMATIC' | 'OTHER'; otherAction?: string; modelNotMarked?: boolean; barrelSerial?: string; frameSerial?: string; receiverSerial?: string };
+  associationFar?: string;
+  associationExpiry?: string;
+  associationNoExpiry?: boolean;
+  prescribedSafe?: 'YES' | 'NO';
+  safeType?: 'HANDGUN' | 'RIFLE' | 'STRONGROOM' | 'DEVICE';
+  safeDetails?: string;
+  safeMounted?: 'YES' | 'NO';
+  safeMountings?: Array<'WALL' | 'FLOOR'>;
 };
 export type FormCase = {
   id: string; application_type: string; competency_category?: CompetencyCategory | null;
   competency_id?: string | null; licence_section?: string | null;
   actual_submission_date?: string | null; target_submission_date?: string | null;
+  firearm_id?: string | null; primary_purpose?: string | null; sport_discipline?: string | null; sport_association?: string | null;
 };
 export type FormCompetency = {
   id: string; category: CompetencyCategory; certificate_number?: string | null;
@@ -65,6 +75,7 @@ export function previousCompetencies(records: FormCompetency[], application: For
 export function evaluateApplicationForm(input: {
   application: FormCase; profile?: Saps271Declarations | null; idNumber?: string | null;
   competencies: FormCompetency[]; competency?: FormCompetency | null; licence?: FormLicence | null;
+  firearm?: { id: string; model?: string | null; serial_number?: string | null } | null;
 }) {
   const { application: app, profile, competencies, competency, licence } = input;
   const answers = applicationFormAnswers(profile, app.id);
@@ -76,6 +87,61 @@ export function evaluateApplicationForm(input: {
   const prior = further ? previousCompetencies(competencies, app, answers) : [];
   // Validated client identity is an SA identity document, not a citizenship answer.
   fields.identificationType = isValidSouthAfricanId(input.idNumber ?? '') ? 'SA_ID' : '';
+  if (['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(app.application_type)) {
+    const firearm = input.firearm;
+    const detail = firearm && firearm.id === app.firearm_id && answers.saps271Firearm?.firearmId === firearm.id ? answers.saps271Firearm : undefined;
+    const put = (key: string, value: string | null | undefined) => { fields[`saps271${key}`] = value?.trim() ?? ''; return fields[`saps271${key}`]; };
+    const required = (key: string, value: string | null | undefined, label: string, max = 80) => {
+      const text = put(key, value);
+      if (!text || text.length > max) issues.push(`SAPS 271: ${label} is required (maximum ${max} characters for the printed field).`);
+      return text;
+    };
+    put('Action', detail?.action);
+    if (!['MANUAL','SEMI_AUTOMATIC','AUTOMATIC','OTHER'].includes(detail?.action ?? '')) { put('Action',''); issues.push('SAPS 271: explicitly select the action for the linked firearm.'); }
+    if (detail?.action === 'OTHER') required('OtherAction',detail.otherAction,'other firearm action',80);
+    if (!firearm?.model?.trim() && !detail?.modelNotMarked) issues.push('SAPS 271: record the model in Edit firearm, or confirm that no model is marked/applicable.');
+    for (const [key,value] of [['BarrelSerial',detail?.barrelSerial],['FrameSerial',detail?.frameSerial],['ReceiverSerial',detail?.receiverSerial]] as const) {
+      put(key,value);
+      if (value && value.trim().length > 40) issues.push(`SAPS 271: ${key} exceeds the printed field (40 characters).`);
+    }
+    const serials = [detail?.barrelSerial,detail?.frameSerial,detail?.receiverSerial].map(s=>s?.trim()).filter(Boolean);
+    if (!serials.length) issues.push('SAPS 271: enter the serial against its actual barrel, frame or receiver component.');
+    if (firearm?.serial_number?.trim() && !serials.includes(firearm.serial_number.trim())) issues.push('SAPS 271: identify the component bearing the recorded firearm serial number. Do not guess or change the serial.');
+    const purpose = [app.primary_purpose?.trim(),app.sport_discipline?.trim()].filter(Boolean).join('; ');
+    required('Purpose',purpose,'application purpose/discipline in the application editor',280);
+    if (!app.primary_purpose?.trim()) issues.push('SAPS 271: record the primary purpose in the application editor.');
+    if (['16','17','19'].includes((app.licence_section ?? '').replace(/\D/g,''))) {
+      const member = answers.associationMember === 'YES' || answers.associationMember === 'NO' ? answers.associationMember : '';
+      put('AssociationMember',member);
+      if (!member) issues.push('SAPS 271: answer membership of an accredited association.');
+      if (member === 'YES') {
+        required('AssociationName',app.sport_association?.trim() || answers.associationName,'accredited association name',75);
+        const far = required('AssociationFar',answers.associationFar,'association FAR/accreditation number',19);
+        if (far && !/^[a-z0-9]+$/i.test(far)) issues.push('SAPS 271: the FAR number must fit the alphanumeric character boxes.');
+        required('AssociationNumber',answers.associationNumber,'membership number',30);
+        put('AssociationJoined',answers.associationJoined);
+        if (dateDay(answers.associationJoined) === null) issues.push('SAPS 271: enter a valid association joining date.');
+        if (!answers.associationNoExpiry) {
+          put('AssociationExpiry',answers.associationExpiry);
+          if (dateDay(answers.associationExpiry) === null) issues.push('SAPS 271: enter the membership expiry date, or explicitly confirm no expiry applies.');
+        }
+      }
+    }
+    for (const [key,value,label] of [['PrescribedSafe',answers.prescribedSafe,'Do you have the prescribed safe?'],['SafeMounted',answers.safeMounted,'Is the safe mounted?']] as const) {
+      put(key,value === 'YES' || value === 'NO' ? value : '');
+      if (!fields[`saps271${key}`]) issues.push(`SAPS 271: answer "${label}" explicitly.`);
+    }
+    if (answers.prescribedSafe === 'YES') {
+      if (!['HANDGUN','RIFLE','STRONGROOM','DEVICE'].includes(answers.safeType ?? '')) issues.push('SAPS 271: select the actual safe type.');
+      else put('SafeType',answers.safeType);
+      required('SafeDetails',answers.safeDetails,'short description of the safe',40);
+    }
+    if (answers.safeMounted === 'YES') {
+      const mounts = answers.safeMountings ?? [];
+      if (!mounts.length || mounts.some(m=>!['WALL','FLOOR'].includes(m))) issues.push('SAPS 271: specify Wall and/or Floor mounting.');
+      put('MountWall',mounts.includes('WALL')?'X':'');put('MountFloor',mounts.includes('FLOOR')?'X':'');
+    }
+  }
   if (further) {
     const categories = answers.furtherCategories ?? (app.competency_category ? [app.competency_category] : []);
     if (!categories.length || categories.some(c => !FURTHER_CATEGORIES.includes(c))) issues.push('Select the applicable Handgun, Rifle and/or Shotgun categories printed on SAPS 517(a). SLR has no separate box on this pinned form.');

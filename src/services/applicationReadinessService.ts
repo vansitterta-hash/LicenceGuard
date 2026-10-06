@@ -42,6 +42,7 @@ type CaseRow = {
   supplier_id_or_registration: string | null;
   primary_purpose: string | null;
   sport_discipline: string | null;
+  sport_association?: string | null;
 };
 type CompetencyRow = {
   id: string;
@@ -264,7 +265,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       competencies, category, applicationCase.competency_id,
       applicationCase.application_type === 'COMPETENCY_ADDITIONAL_CATEGORY'
     );
-    const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies, competency: matchingCompetency, licence });
+    const form = evaluateApplicationForm({ application: applicationCase, profile: client.saps271_declarations, idNumber: client.id_number, competencies, competency: matchingCompetency, licence, firearm });
     const baseDefinitions = REQUIREMENTS[applicationCase.application_type] ?? COMMON;
     const definitions: RequirementDefinition[] = baseDefinitions.map((definition) => ({ ...definition }));
     if (applicationCase.competency_id && !matchingCompetency) {
