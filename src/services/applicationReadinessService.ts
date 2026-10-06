@@ -2,6 +2,9 @@ import { supabase } from '../lib/supabase';
 import { declarationReadinessIssues } from '../utils/saps271Declarations';
 import { saps517RequiredProfileIssues } from '../utils/saps517Applicant';
 import { evaluateApplicationForm } from '../utils/applicationFormAnswers';
+import { currentGenerated271, saps271GeneratedState, saps271SourceSnapshot } from '../utils/saps271GeneratedState';
+import { buildApplicationAutofillPackage } from './applicationAutofillService';
+import { createReviewValues } from './generatedApplicationDocumentService';
 import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import type { Saps271Declarations } from '../types/saps271Declarations';
 import { isApplicationTypeSupportedInBeta, UNSUPPORTED_APPLICATION_TYPE_MESSAGE } from '../utils/unsupportedApplicationTypePolicy';
@@ -208,6 +211,10 @@ function selectRequirementDocument(
         || Boolean(licence && document.firearm_licence_id === licence.id);
     })
     .sort((left, right) => {
+      if (['FIREARM_LICENCE_FIRST_APPLICATION','FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.application_type) && ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS'].includes(requirement.key)) {
+        const valid = (d: DocumentRecord) => Boolean(d.expiry_date && Number.isFinite(Date.parse(d.expiry_date)) && daysUntil(d.expiry_date) >= 0);
+        if (valid(left) !== valid(right)) return valid(left) ? -1 : 1;
+      }
       const leftExpired = Boolean(left.expiry_date && daysUntil(left.expiry_date) < 0);
       const rightExpired = Boolean(right.expiry_date && daysUntil(right.expiry_date) < 0);
       if (leftExpired !== rightExpired) return leftExpired ? 1 : -1;
@@ -254,7 +261,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
   const firearmById = new Map(firearms.map((item) => [item.id, item]));
   const licenceById = new Map(licences.map((item) => [item.id, item]));
 
-  const readinessCases: ApplicationCaseReadiness[] = cases.map((applicationCase) => {
+  const readinessCases: ApplicationCaseReadiness[] = await Promise.all(cases.map(async (applicationCase) => {
     const firearm = applicationCase.firearm_id ? firearmById.get(applicationCase.firearm_id) : undefined;
     const licence = applicationCase.firearm_licence_id ? licenceById.get(applicationCase.firearm_licence_id) : undefined;
     const category = applicationCase.competency_category ?? firearm?.required_competency ?? null;
@@ -321,6 +328,10 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       );
     }
 
+    const is271 = ['FIREARM_LICENCE_FIRST_APPLICATION','FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.application_type);
+    const current271 = is271 ? currentGenerated271(documents,applicationCase.id) : undefined;
+    const source271 = current271 ? await buildApplicationAutofillPackage(clientId,applicationCase.id) : undefined;
+    const generated271State = saps271GeneratedState(current271,source271 ? saps271SourceSnapshot({data:source271,reviewValues:createReviewValues(source271)}) : '');
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;
       let documentId: string | undefined;
@@ -364,9 +375,19 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
             : !linked && definition.documentType && GENERATED_APPLICATION_FORM_TYPES.has(definition.documentType)
               ? 'PENDING_GENERATION'
               : documentState(linked);
+        if (is271 && ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS'].includes(definition.key) && linked && (!linked.expiry_date || !Number.isFinite(Date.parse(linked.expiry_date)))) {
+          state = 'UNVERIFIED';
+          definition.detail = 'Record and verify the current certificate validity/expiry before using this time-sensitive evidence.';
+        }
+      }
+      const generated271 = is271 && definition.documentType === 'FIREARM_LICENCE_APPLICATION_FORM' && (current271 || !documentId);
+      if (generated271) {
+        documentId = current271?.id;
+        state = generated271State === 'CONFIRMED' ? 'SATISFIED' : generated271State === 'AWAITING_REVIEW' ? 'UNVERIFIED' : 'PENDING_GENERATION';
       }
       return {
         ...definition,
+        ...(generated271 ? {generatedFormState:generated271State,detail:generated271State === 'OUTDATED' ? 'Source data changed or this version predates source tracking. Regenerate SAPS 271, then review and confirm the new version.' : generated271State === 'AWAITING_REVIEW' ? 'Generated SAPS 271 is awaiting review and confirmation.' : generated271State === 'CONFIRMED' ? 'Current SAPS 271 reviewed and confirmed.' : 'Generate SAPS 271 from saved source data.'} : {}),
         documentId,
         state,
         delivery: state === 'MANUAL_REQUIRED'
@@ -399,7 +420,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       caseId: applicationCase.id,
       applicationType: applicationCase.application_type,
       subject,
-      status: applicationCase.status,
+      status: is271 && applicationCase.status === 'NOT_STARTED' && (score > 0 || current271) ? 'IN_PROGRESS' : applicationCase.status,
       competencyCategory: category,
       firearmId: applicationCase.firearm_id,
       firearmLicenceId: applicationCase.firearm_licence_id,
@@ -413,7 +434,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
         item.required && (item.state === 'UNVERIFIED' || item.state === 'PENDING_GENERATION')
       ).length,
     };
-  });
+  }));
 
   if (readinessCases.length === 0) {
     return { clientId, clientName: `${client.first_name} ${client.surname}`, state: 'NO_CASES', score: 0, readyCases: 0, blockedCases: 0, actionRequiredCases: 0, cases: [] };

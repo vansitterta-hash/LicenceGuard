@@ -4,7 +4,7 @@ import Button from '../Button';
 import Card from '../Card';
 import TextField from '../TextField';
 import { Colors } from '../../theme/colors';
-import { applicationFormAnswers, evaluateApplicationForm, FURTHER_CATEGORIES, licenceTermKey, licenceTermNeedsReview, type ApplicationFormAnswers, type FormCase, type FormCompetency, type FormLicence } from '../../utils/applicationFormAnswers';
+import { applicationFormAnswers, saps271ComponentSerials, evaluateApplicationForm, FURTHER_CATEGORIES, licenceTermKey, licenceTermNeedsReview, type ApplicationFormAnswers, type FormCase, type FormCompetency, type FormLicence } from '../../utils/applicationFormAnswers';
 import { saveApplicationFormAnswers } from '../../services/applicationFormAnswerService';
 import type { Saps271Declarations } from '../../types/saps271Declarations';
 import Saps271DeclarationsSection from './Saps271DeclarationsSection';
@@ -40,6 +40,7 @@ export default function ApplicationFormQuestions(props: {
   });
   const selected = answers.furtherCategories ?? (props.application.competency_category ? [props.application.competency_category] : []);
   const firearmAnswers = answers.saps271Firearm?.firearmId === props.firearm?.id ? answers.saps271Firearm : undefined;
+  const componentSerials = saps271ComponentSerials(firearmAnswers, props.firearm?.serial_number);
   const updateFirearm = (patch: Partial<NonNullable<ApplicationFormAnswers['saps271Firearm']>>) => {
     if (props.firearm) update({ saps271Firearm: { ...firearmAnswers, ...patch, firearmId: props.firearm.id } });
   };
@@ -53,8 +54,9 @@ export default function ApplicationFormQuestions(props: {
       <Text style={{ color: Colors.text }}>Explicit firearm action</Text>
       {(['MANUAL','SEMI_AUTOMATIC','AUTOMATIC','OTHER'] as const).map(action => <Button key={action} disabled={saving || !props.firearm} title={`${firearmAnswers?.action === action ? '✓ ' : ''}${action.replaceAll('_',' ')}`} onPress={() => updateFirearm({action})} />)}
       {firearmAnswers?.action === 'OTHER' ? <TextField label="Other action (as recorded on firearm)" value={firearmAnswers.otherAction ?? ''} onChangeText={otherAction=>updateFirearm({otherAction})} /> : null}
-      <Text style={{ color: Colors.text }}>Enter serials only for the components actually bearing them. Leave other components blank; do not copy the generic serial without identifying its component.</Text>
-      {(['barrelSerial','frameSerial','receiverSerial'] as const).map(key=><TextField key={key} label={`${key.replace('Serial','')} serial number`} value={firearmAnswers?.[key] ?? ''} onChangeText={value=>updateFirearm({[key]:value})} />)}
+      <Text style={{ color: Colors.text }}>Existing firearm serial: {props.firearm?.serial_number || 'not recorded'}. Which component bears this serial?</Text>
+      {props.firearm?.serial_number?.trim() ? (['BARREL','FRAME','RECEIVER'] as const).map(serialComponent=><Button key={serialComponent} disabled={saving} title={`${componentSerials.component===serialComponent?'✓ ':''}${serialComponent}`} onPress={()=>updateFirearm({serialComponent})} />) : null}
+      {(['barrelSerial','frameSerial','receiverSerial'] as const).filter(key=>!props.firearm?.serial_number?.trim() || (firearmAnswers?.[key]?.trim() && firearmAnswers[key]?.trim() !== props.firearm.serial_number.trim())).map(key=><TextField key={key} label={`${key.replace('Serial','')} serial number`} value={firearmAnswers?.[key] ?? ''} onChangeText={value=>updateFirearm({[key]:value})} />)}
       {['16','17','19'].includes((props.application.licence_section ?? '').replace(/\D/g,'')) ? <>
         <Text style={{ color: Colors.text }}>G55. Are you a member of an accredited association?</Text>
         {(['YES','NO'] as const).map(value=><Button key={value} disabled={saving} title={`${answers.associationMember===value?'✓ ':''}${value}`} onPress={()=>update({associationMember:value})} />)}

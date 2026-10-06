@@ -18,7 +18,7 @@ export type ApplicationFormAnswers = {
   beforeExpiryReason?: string;
   afterExpiryReason?: string;
   licenceTermConfirmed?: string;
-  saps271Firearm?: { firearmId: string; action?: 'MANUAL' | 'SEMI_AUTOMATIC' | 'AUTOMATIC' | 'OTHER'; otherAction?: string; modelNotMarked?: boolean; barrelSerial?: string; frameSerial?: string; receiverSerial?: string };
+  saps271Firearm?: { firearmId: string; action?: 'MANUAL' | 'SEMI_AUTOMATIC' | 'AUTOMATIC' | 'OTHER'; otherAction?: string; modelNotMarked?: boolean; serialComponent?: 'BARREL' | 'FRAME' | 'RECEIVER'; barrelSerial?: string; frameSerial?: string; receiverSerial?: string };
   associationFar?: string;
   associationExpiry?: string;
   associationNoExpiry?: boolean;
@@ -40,6 +40,16 @@ export type FormCompetency = {
 };
 export type FormLicence = { id: string; licence_section?: string | null; issue_date?: string | null; expiry_date?: string | null };
 export const FURTHER_CATEGORIES: CompetencyCategory[] = ['HANDGUN', 'RIFLE', 'SHOTGUN'];
+export function saps271ComponentSerials(detail: ApplicationFormAnswers['saps271Firearm'], storedSerial?: string | null) {
+  const serial = storedSerial?.trim() ?? '';
+  const components = ['BARREL','FRAME','RECEIVER'] as const;
+  const keys = ['barrelSerial','frameSerial','receiverSerial'] as const;
+  // A single explicit legacy component answer is already a classification.
+  const matches = components.filter((_,i)=>serial && detail?.[keys[i]]?.trim() === serial);
+  const component = components.includes(detail?.serialComponent as typeof components[number]) ? detail!.serialComponent : matches.length === 1 ? matches[0] : undefined;
+  const values = Object.fromEntries(keys.map((key,i)=>[key, serial && component === components[i] ? serial : detail?.[key]?.trim() === serial ? '' : detail?.[key]?.trim() ?? ''])) as Record<typeof keys[number],string>;
+  return { component, ...values };
+}
 export function applicationFormAnswers(profile: Saps271Declarations | null | undefined, caseId: string): ApplicationFormAnswers {
   return profile?.applications?.[caseId] ?? {};
 }
@@ -100,13 +110,14 @@ export function evaluateApplicationForm(input: {
     if (!['MANUAL','SEMI_AUTOMATIC','AUTOMATIC','OTHER'].includes(detail?.action ?? '')) { put('Action',''); issues.push('SAPS 271: explicitly select the action for the linked firearm.'); }
     if (detail?.action === 'OTHER') required('OtherAction',detail.otherAction,'other firearm action',80);
     if (!firearm?.model?.trim() && !detail?.modelNotMarked) issues.push('SAPS 271: record the model in Edit firearm, or confirm that no model is marked/applicable.');
-    for (const [key,value] of [['BarrelSerial',detail?.barrelSerial],['FrameSerial',detail?.frameSerial],['ReceiverSerial',detail?.receiverSerial]] as const) {
+    const components = saps271ComponentSerials(detail,firearm?.serial_number);
+    for (const [key,value] of [['BarrelSerial',components.barrelSerial],['FrameSerial',components.frameSerial],['ReceiverSerial',components.receiverSerial]] as const) {
       put(key,value);
       if (value && value.trim().length > 40) issues.push(`SAPS 271: ${key} exceeds the printed field (40 characters).`);
     }
-    const serials = [detail?.barrelSerial,detail?.frameSerial,detail?.receiverSerial].map(s=>s?.trim()).filter(Boolean);
+    const serials = [components.barrelSerial,components.frameSerial,components.receiverSerial].filter(Boolean);
     if (!serials.length) issues.push('SAPS 271: enter the serial against its actual barrel, frame or receiver component.');
-    if (firearm?.serial_number?.trim() && !serials.includes(firearm.serial_number.trim())) issues.push('SAPS 271: identify the component bearing the recorded firearm serial number. Do not guess or change the serial.');
+    if (firearm?.serial_number?.trim() && !components.component) issues.push('SAPS 271: select which component bears the existing firearm serial. The stored serial is reused automatically.');
     const purpose = [app.primary_purpose?.trim(),app.sport_discipline?.trim()].filter(Boolean).join('; ');
     required('Purpose',purpose,'application purpose/discipline in the application editor',280);
     if (!app.primary_purpose?.trim()) issues.push('SAPS 271: record the primary purpose in the application editor.');

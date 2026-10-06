@@ -153,11 +153,11 @@ Object.assign(client, { dealer_id: 'dealer-test', saps271_declarations: { ...yes
 rows.firearms = [{ id:'owned',client_id:client.id,is_active:true,make:'Example',model:'Stored model',calibre:'12 gauge',serial_number:'TEST',required_competency:'SHOTGUN',firearm_type:'SHOTGUN' }];
 rows.competencies = [{id:'competency',client_id:client.id,category:'SHOTGUN',certificate_number:'CERT',issue_date:'2020-01-01',verified:true}];
 const persistDb = { auth: { getUser:async()=>({data:{user:{id:'user-test'}},error:null}) }, from(table) {
-  let payload, single=false;const filters=[];
+  let payload, inserted, single=false;const filters=[];
   const q={select(){return q;},order(){return q;},not(){return q;},single(){single=true;return q;},maybeSingle(){single=true;return q;},
     eq(k,v){filters.push(r=>k==='saps271_declarations'?JSON.stringify(r[k])===v:r[k]===v);return q;},
-    is(k,v){filters.push(r=>r[k]==v);return q;},update(value){payload=value;return q;},
-    then(resolve,reject){const source=Array.isArray(rows[table])?rows[table]:[rows[table]];const selected=source.filter(r=>filters.every(f=>f(r)));if(payload)selected.forEach(r=>Object.assign(r,structuredClone(payload)));return Promise.resolve({data:structuredClone(single?selected[0]:selected),error:null}).then(resolve,reject);},
+    is(k,v){filters.push(r=>r[k]==v);return q;},update(value){payload=value;return q;},insert(value){inserted=value;return q;},
+    then(resolve,reject){if(inserted){rows[table].push({id:`generated-${rows[table].length}`,created_at:new Date().toISOString(),...structuredClone(inserted)});return Promise.resolve({error:null}).then(resolve,reject);}const source=Array.isArray(rows[table])?rows[table]:[rows[table]];const selected=source.filter(r=>filters.every(f=>f(r)));if(payload)selected.forEach(r=>Object.assign(r,structuredClone(payload)));return Promise.resolve({data:structuredClone(single?selected[0]:selected),error:null}).then(resolve,reject);},
   };return q;
 } };
 const persistedLoad=loader({'../lib/supabase':{supabase:persistDb}});
@@ -167,6 +167,8 @@ const Editor=loader({react:editorHarness.react,'react-native':nativeMock,'../Car
 editorHarness.mount(Editor,{application:applicationCase,profile:client.saps271_declarations,idNumber:client.id_number,competencies:rows.competencies,firearm:rows.firearms[0],dealerId:'dealer-test',clientId:client.id,userId:'user-test',onSaved:()=>{}});
 await editorHarness.settle();
 const declarationEditor=nodes(editorHarness.tree).find(n=>n.type==='Declarations');
+assert.ok(!nodes(editorHarness.tree).some(n=>/^(barrel|frame|receiver) serial number$/.test(n.props?.label ?? '')),'Known serial is not a text-entry prompt');
+assert.ok(nodes(editorHarness.tree).some(n=>n.props?.title==='BARREL'),'Component classification is offered');
 assert.ok(declarationEditor,'The source application editor must expose the actual 271 declaration review');
 declarationEditor.props.onConfirm({...client.saps271_declarations,confirmedAt:new Date().toISOString()});
 await editorHarness.settle();
@@ -217,4 +219,78 @@ await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:
 assert.equal(client.saps271_declarations.answers.convictions.answer,null);
 assert.equal((await persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id)).canGenerate,false);
 editorHarness.unmount();
+// Actual generated-document registration -> reload -> stale -> regeneration -> confirmation.
+await answerService.saveApplicationFormAnswers({dealerId:'dealer-test',clientId:client.id,caseId:applicationCase.id,userId:'user-test',answers:{...physicalAnswers,licenceTermConfirmed:termKey,saps271Firearm:{firearmId:'owned',action:'MANUAL',serialComponent:'RECEIVER'}},declarations:yes});
+persistDb.storage={from:()=>({upload:async()=>({error:null}),remove:async()=>({error:null})})};
+const generation=persistedLoad('src/services/generatedApplicationDocumentService.ts');
+const docs=persistedLoad('src/services/documentService.ts');
+const freshData=()=>persistedLoad('src/services/applicationAutofillService.ts').buildApplicationAutofillPackage(client.id,applicationCase.id);
+const readCase=async()=>(await persistedLoad('src/services/applicationReadinessService.ts').getClientApplicationReadiness(client.id)).cases[0];
+const requirement=async()=>(await readCase()).requirements.find(r=>r.documentType==='FIREARM_LICENCE_APPLICATION_FORM');
+const register=async()=>{const data=await freshData();return generation.archiveOfficialApplicationPdf({dealerId:'dealer-test',clientId:client.id,userId:'user-test',data,values:generation.createReviewValues(data),bytes:new Uint8Array([37,80,68,70])});};
+assert.equal((await requirement()).generatedFormState,'NOT_GENERATED');
+const first=await register();
+assert.equal(first.owner_user_id,'user-test');assert.equal(first.record_scope,'PRIVATE');
+assert.equal((await requirement()).generatedFormState,'AWAITING_REVIEW');
+assert.equal((await requirement()).state,'UNVERIFIED');
+assert.equal((await readCase()).status,'IN_PROGRESS');
+assert.equal((await register()).id,first.id,'Accidental repeat registration reuses current source version');
+await docs.setDocumentVerified(first.id,true,'user-test');
+assert.equal((await requirement()).generatedFormState,'CONFIRMED');
+assert.equal((await requirement()).state,'SATISFIED');
+client.address_line_1='2 Corrected Street';
+assert.equal((await requirement()).generatedFormState,'OUTDATED');
+assert.equal((await requirement()).state,'PENDING_GENERATION');
+await assert.rejects(docs.setDocumentVerified(first.id,true,'user-test'),/outdated|superseded/);
+const second=await register();
+assert.notEqual(first.id,second.id);assert.equal(second.parent_document_id,first.id);assert.equal(second.version_number,2);
+assert.equal(second.application_case_id,applicationCase.id);assert.equal(rows.application_cases.length,1);
+assert.equal(second.is_verified,false);assert.equal((await requirement()).documentId,second.id);
+assert.equal((await requirement()).generatedFormState,'AWAITING_REVIEW');
+await assert.rejects(docs.setDocumentVerified(first.id,true,'user-test'),/outdated|superseded/);
+await docs.setDocumentVerified(second.id,true,'user-test');
+assert.equal((await requirement()).generatedFormState,'CONFIRMED');
+assert.equal(rows.documents.find(d=>d.id===first.id).is_verified,true,'Historical review record retained');
+const statePolicy=persistedLoad('src/utils/saps271GeneratedState.ts');
+assert.equal(statePolicy.saps271FormAction('OUTDATED'),'Regenerate SAPS 271');
+assert.equal(statePolicy.saps271FormAction('AWAITING_REVIEW'),'Preview / Review SAPS 271');
+const finalRequirements=(await readCase()).requirements;
+for(const key of ['DEDICATED_STATUS','MEMBERSHIP_CERTIFICATE','MOTIVATION','SAFE_PHOTOS','SAFE_SECURING_PHOTOS']) assert.equal(finalRequirements.find(r=>r.key===key)?.required,true,key);
+for (const type of ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS']) {
+  const evidence={id:`proof-${type}`,client_id:client.id,document_type:type,document_scope:'CLIENT',lifecycle_status:'ACTIVE',is_verified:true,metadata:{},created_at:new Date().toISOString()};
+  rows.documents.push(evidence);
+  assert.equal((await readCase()).requirements.find(r=>r.key===type).state,'UNVERIFIED','Unknown validity cannot satisfy current evidence');
+  evidence.expiry_date='2000-01-01';assert.equal((await readCase()).requirements.find(r=>r.key===type).state,'EXPIRED');
+  evidence.expiry_date='2099-01-01';assert.equal((await readCase()).requirements.find(r=>r.key===type).state,'SATISFIED');
+}
+console.log('PASS: SAPS 271 canonical serial classification, private same-case regeneration/history, stale confirmation denied, fresh review required, source reload and current Section 16 evidence requirements.');
+// Exercise the existing screen against each generated-form requirement state.
+for (const [generatedFormState,state] of [['NOT_GENERATED','PENDING_GENERATION'],['AWAITING_REVIEW','UNVERIFIED'],['OUTDATED','PENDING_GENERATION'],['CONFIRMED','SATISFIED']]) {
+  const viewCase={...(await readCase()),readyToGenerate:state==='SATISFIED',requirements:[{...(await requirement()),state,generatedFormState,documentId:generatedFormState==='NOT_GENERATED'?undefined:second.id}]};
+  const h=hookHarness(), navigations=[];
+  const screenLoad=loader({'../lib/supabase':{supabase:persistDb},react:h.react,'react-native':nativeMock,
+    'lucide-react-native':new Proxy({},{get:(_,key)=>String(key)}),
+    '../components/Button':'Button','../components/Card':'Card','../components/Screen':'Screen','../components/TextField':'TextField','../components/intelligence/ReadOnlyIntelligencePanel':'IntelligencePanel',
+    '../context/AuthContext':{useAuth:()=>({dealerProfile:{dealerId:'dealer-test'},user:{id:'user-test'}})},
+    '../services/applicationReadinessService':{getClientApplicationReadiness:async()=>({clientId:client.id,cases:[viewCase]})},
+    '../services/documentService':{...docs,listClientDocuments:async()=>generatedFormState==='NOT_GENERATED'?[]:structuredClone(rows.documents)},
+    '../services/applicationCaseService':{getApplicationCase:async()=>applicationCase},
+    '../services/applicationDocumentSuggestionService':{suggestApplicationDocuments:async()=>({suggestions:[]})},
+    '../services/applicationWorkspaceService':{getApplicationWorkspaceMeta:async()=>({status:'NOT_STARTED',progressPercent:0}),listApplicationWorkspaceEvents:async()=>[]},
+  });
+  h.mount(screenLoad('src/screens/ApplicationReadinessScreen.tsx').default,{navigation:{addListener:()=>()=>{},navigate:(...args)=>navigations.push(args)},route:{params:{clientId:client.id,applicationCaseId:applicationCase.id}}});
+  await h.settle();
+  const labels=node=>nodes(node).map(n=>n.props?.children).filter(v=>typeof v==='string');
+  const workflow=nodes(h.tree).find(n=>n.props?.title==='Guided application workflow');
+  const step=nodes(workflow).find(n=>n.type==='Pressable'&&labels(n).includes('SAPS forms'));
+  assert.ok(step);assert.equal(labels(step).includes('Complete'),state==='SATISFIED','Only confirmed current 271 completes SAPS Forms');
+  const action=nodes(h.tree).find(n=>n.type==='Button'&&n.props?.title===statePolicy.saps271FormAction(generatedFormState));
+  assert.ok(action,generatedFormState);action.props.onPress();
+  assert.equal(navigations.at(-1)[0],state==='PENDING_GENERATION'?'ApplicationAutofill':'DocumentLibrary');
+  if(state!=='PENDING_GENERATION')assert.equal(navigations.at(-1)[1].openUpload,false);
+  assert.ok(!nodes(h.tree).some(n=>n.type==='Button'&&n.props?.title==='Upload or replace'));
+  assert.ok(labels(h.tree).includes('IN PROGRESS'));
+  h.unmount();
+}
+console.log('PASS: generated SAPS 271 UI Generate/Review/Regenerate/Confirmed states, no Upload-or-replace primary action, truthful progress status.');
 console.log('R09 passed: existing application editor confirmation persists canonical answers and YES details; fresh readiness and AutoFill clear the blocker and allow generation; unknowns stay blocked; existing declaration/mapping regressions pass.');

@@ -1,3 +1,4 @@
+import { isGenerated271, saps271FormAction } from '../utils/saps271GeneratedState';
 import { userAlert as Alert } from '../utils/userAlert';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -497,10 +498,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const sapsFormComplete =
     !sapsFormRequirement ||
     sapsFormRequirement.state === 'SATISFIED' ||
-    generatedDocuments.some(
+    (!sapsFormRequirement.generatedFormState && generatedDocuments.some(
       (document) =>
         document.document_type === sapsFormRequirement.documentType
-    );
+    ));
   const reviewComplete = ready;
   const packComplete = generatedDocuments.some((document) =>
     document.document_name.toLowerCase().includes('pack')
@@ -619,7 +620,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       complete: workflowCompletion[5],
       current: activeWorkflowIndex === 5,
       actionLabel: sapsFormRequirement
-        ? sapsFormComplete ? 'Review SAPS form' : 'Prepare SAPS form'
+        ? sapsFormRequirement.generatedFormState ? saps271FormAction(sapsFormRequirement.generatedFormState) : sapsFormComplete ? 'Review SAPS form' : 'Prepare SAPS form'
         : undefined,
       onPress: sapsFormRequirement
         ? () => openRequirement(sapsFormRequirement)
@@ -858,7 +859,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
             }}
             title={
               firstOutstanding
-                ? firstOutstanding.documentType
+                ? firstOutstanding.generatedFormState ? saps271FormAction(firstOutstanding.generatedFormState) : firstOutstanding.documentType
                   ? 'Upload or replace'
                   : 'Update application'
                 : 'Compile now'
@@ -870,7 +871,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       <Card title="Application progress" subtitle={workspaceMeta ? `Last updated ${new Date(workspaceMeta.updatedAt).toLocaleString()}` : 'Loading saved application status...'}>
         <View style={styles.progressHeader}>
           <View>
-            <Text style={styles.progressLabel}>{workspaceMeta?.status.replace(/_/g, ' ') ?? applicationCase.status.replace(/_/g, ' ')}</Text>
+            <Text style={styles.progressLabel}>{applicationCase.status === 'IN_PROGRESS' ? 'IN PROGRESS' : workspaceMeta?.status.replace(/_/g, ' ') ?? applicationCase.status.replace(/_/g, ' ')}</Text>
             <Text style={styles.progressHint}>This is a persistent working application.</Text>
           </View>
           <Text style={styles.progressPercent}>{progressPercent}%</Text>
@@ -1012,7 +1013,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                       onPress={() => openRequirement(requirement)}
                       size="small"
                       title={
-                        requirement.state === 'PENDING_GENERATION'
+                        requirement.generatedFormState ? saps271FormAction(requirement.generatedFormState) : requirement.state === 'PENDING_GENERATION'
                           ? 'Generate'
                           : document?.is_generated
                             ? 'Review'
@@ -1033,6 +1034,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         title="Generated documents"
         subtitle="SAPS forms and completed packs created by LicenceGuard for this application."
       >
+        {sapsFormRequirement?.generatedFormState ? <Button title="Edit SAPS 271 source data" variant="secondary" onPress={() => navigation.navigate('ApplicationCaseForm', {clientId:route.params.clientId,applicationCaseId:applicationCase.caseId})} /> : null}
         {generatedDocuments.length === 0 ? (
           <View style={styles.generatedEmpty}>
             <FileOutput color={Colors.silverDark} size={30} />
@@ -1052,7 +1054,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
                   <View style={styles.generatedText}>
                     <Text style={styles.generatedTitle}>{document.document_name}</Text>
                     <Text style={styles.generatedMeta}>
-                      {getDocumentTypeLabel(document.document_type)}
+                      {getDocumentTypeLabel(document.document_type)}{isGenerated271(document) ? document.id !== sapsFormRequirement?.documentId ? ' — Previous version' : ' — ' + (sapsFormRequirement?.generatedFormState ?? 'Awaiting review').replaceAll('_',' ') : ''}
                     </Text>
                   </View>
                 </View>
@@ -1243,7 +1245,7 @@ function SuggestionGroup({ title, items, onView }: { title: string; items: Appli
 }
 
 function RequirementRow({ requirement, onPress }: { requirement: ReadinessRequirement; onPress: () => void }) {
-  const stateLabel = requirement.state === 'EXPIRED'
+  const stateLabel = requirement.generatedFormState ? saps271FormAction(requirement.generatedFormState) : requirement.state === 'EXPIRED'
     ? 'Expired'
     : requirement.state === 'MANUAL_REQUIRED'
       ? 'Add manually'

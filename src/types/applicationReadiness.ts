@@ -24,6 +24,7 @@ export type RequirementDelivery =
   | 'PHYSICAL_SUBMISSION';
 
 export type ReadinessRequirement = {
+  generatedFormState?: import('../utils/saps271GeneratedState').Saps271GeneratedState;
   /** Existing source selected for this requirement; no document record is mutated. */
   documentId?: string;
   key: string;

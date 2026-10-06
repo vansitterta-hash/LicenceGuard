@@ -4,6 +4,7 @@ import type { DocumentRecord, DocumentType } from '../types/document';
 import { mapApplicationToSapsTemplate } from '../engines/sapsFieldMappingEngine';
 import { getSapsTemplate } from '../data/sapsTemplateRegistry';
 import { renderOfficialPdfTemplate } from '../engines/pdfTemplateRenderer';
+import { currentGenerated271, saps271SourceSnapshot } from '../utils/saps271GeneratedState';
 import { saps517RequiredProfileIssues, saps517ApplicantFields, saps517Address } from '../utils/saps517Applicant';
 
 const DOCUMENT_BUCKET = 'licenceguard-documents';
@@ -259,6 +260,16 @@ export async function archiveOfficialApplicationPdf(input: {
   bytes?: Uint8Array;
 }): Promise<DocumentRecord> {
   const privacy = generatedDocumentPrivacy(input.userId);
+  let previous271: DocumentRecord | undefined;
+  let sourceSnapshot: string | undefined;
+  if (input.data.application.formCode === 'SAPS_271') {
+    sourceSnapshot = saps271SourceSnapshot({ data: input.data, reviewValues: createReviewValues(input.data) });
+    if (sourceSnapshot !== saps271SourceSnapshot({data:input.data,reviewValues:input.values})) throw new Error('Save SAPS 271 corrections in the source application/profile/firearm before regenerating.');
+    const existing = await db.from('documents').select('*').eq('application_case_id',input.data.application.applicationCaseId).eq('client_id',input.clientId).eq('lifecycle_status','ACTIVE');
+    if (existing.error) throw new Error(existing.error.message);
+    previous271 = currentGenerated271(existing.data ?? [],input.data.application.applicationCaseId);
+    if (previous271?.metadata?.saps271SourceSnapshot === sourceSnapshot) return previous271;
+  }
   const bytes = input.bytes ?? await generateOfficialApplicationPdf(input.data, input.values);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = `${input.data.application.formCode}_${timestamp}.pdf`;
@@ -280,7 +291,7 @@ export async function archiveOfficialApplicationPdf(input: {
     firearm_id: null,
     firearm_licence_id: null,
     application_case_id: input.data.application.applicationCaseId,
-    parent_document_id: null,
+    parent_document_id: previous271?.id ?? null,
     document_type: documentTypeFor(input.data),
     document_scope: 'APPLICATION_CASE',
     lifecycle_status: 'ACTIVE',
@@ -289,7 +300,7 @@ export async function archiveOfficialApplicationPdf(input: {
     expiry_date: null,
     issued_by: 'LicenceGuard Document Engine',
     reference_number: input.values.applicationReference.trim() || null,
-    version_number: 1,
+    version_number: (previous271?.version_number ?? 0) + 1,
     storage_path: storagePath,
     file_name: fileName,
     original_file_name: fileName,
@@ -306,6 +317,7 @@ export async function archiveOfficialApplicationPdf(input: {
       applicationType: input.data.application.applicationType,
       reviewValues: input.values,
       renderer: 'LICENCEGUARD_PDF_OVERLAY_V1',
+      ...(sourceSnapshot ? { saps271SourceSnapshot: sourceSnapshot } : {}),
     },
     uploaded_by: input.userId,
   });

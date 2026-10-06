@@ -29,6 +29,12 @@ const explicitAnswers = {saps271Firearm:{firearmId:'test-firearm',action:'MANUAL
 profile.applications = {[caseRecord.id]:explicitAnswers};
 const evaluate = (answers=explicitAnswers, app=caseRecord, firearm=firearmRecord) => formPolicy.evaluateApplicationForm({application:app,firearm,competencies:[],profile:{...profile,applications:{[app.id]:answers}}});
 assert.deepEqual(evaluate().issues,[]);
+for (const [component,key] of [['RECEIVER','ReceiverSerial'],['BARREL','BarrelSerial'],['FRAME','FrameSerial']]) {
+  const result=evaluate({...explicitAnswers,saps271Firearm:{firearmId:'test-firearm',action:'MANUAL',serialComponent:component}});
+  assert.deepEqual(result.issues,[]);
+  for(const candidate of ['BarrelSerial','FrameSerial','ReceiverSerial']) assert.equal(result.fields[`saps271${candidate}`],candidate===key?'1165306':'');
+}
+assert.ok(evaluate({...explicitAnswers,saps271Firearm:{firearmId:'test-firearm',action:'MANUAL'}}).issues.length,'Missing classification blocks; never guess');
 for (const answer of Object.values(profile.answers)) answer.answer = 'NO';
 profile.answers.convictions = {answer:'YES',incidents:[{policeStation:'Test station',caseNumber:'TEST-1',charge:'Test charge',outcome:'Test outcome'}]};
 profile.saps517 = {...load('src/utils/saps517Applicant.ts').emptySaps517ApplicantData(),citizenshipChoice:'SA_CITIZEN',postalAddressSameAsResidential:'NO',postalAddress:'PO Box 123',postalLocality:'Test Town',postalAddressPostalCode:'0002',maritalStatus:'SINGLE',residenceDescription:'House',occupation:'Engineer',employmentStatus:'EMPLOYED',employerName:'Test Engineering',businessAddress:'2 Test Road',businessPostalCode:'0003',workTelephone:'0123456789',faxNumber:'0123456780'};

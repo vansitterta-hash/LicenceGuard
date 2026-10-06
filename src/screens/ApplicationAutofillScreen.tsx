@@ -10,6 +10,8 @@ import Screen from '../components/Screen';
 import TextField from '../components/TextField';
 import { useAuth } from '../context/AuthContext';
 import { buildApplicationAutofillPackage } from '../services/applicationAutofillService';
+import { listClientDocuments } from '../services/documentService';
+import { currentGenerated271, saps271GeneratedState, saps271SourceSnapshot } from '../utils/saps271GeneratedState';
 import { updateApplicationSupplierDetails } from '../services/applicationCaseService';
 import {
   archiveOfficialApplicationPdf,
@@ -42,6 +44,7 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
   const [generatedPdf, setGeneratedPdf] = useState<{ bytes: Uint8Array; url: string; fileName: string } | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
+  const [regenerating271, setRegenerating271] = useState(false);
 
   useEffect(() => () => {
     if (generatedPdf) URL.revokeObjectURL(generatedPdf.url);
@@ -53,6 +56,11 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
       const next = await buildApplicationAutofillPackage(route.params.clientId, route.params.applicationCaseId);
       setData(next);
       setValues(createReviewValues(next));
+      if (next.application.formCode === 'SAPS_271') {
+        const current = currentGenerated271(await listClientDocuments(route.params.clientId),route.params.applicationCaseId);
+        setRegenerating271(Boolean(current));
+        if (current && saps271GeneratedState(current,saps271SourceSnapshot({data:next,reviewValues:createReviewValues(next)})) === 'OUTDATED') savedGeneration.current = null;
+      }
     } catch (error) {
       Alert.alert('Unable to build AutoFill data', error instanceof Error ? error.message : 'An unknown error occurred.');
     } finally {
@@ -177,7 +185,7 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
             <Text style={styles.muted}>{data.canGenerate ? 'Review and correct the mapped fields below. Generate saves the official PDF against this application before opening it.' : `${data.blockingIssueCount} mandatory field${data.blockingIssueCount === 1 ? '' : 's'} must be completed first.`}</Text>
           </View>
           <View style={styles.actions}>
-            <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} loading={generatingPdf} onPress={() => void generatePdf()} title="Generate official PDF" />
+            <Button disabled={!canFinalise} leftIcon={<Printer color={Colors.white} size={18} />} loading={generatingPdf} onPress={() => void generatePdf()} title={regenerating271 ? 'Regenerate SAPS 271' : 'Generate official PDF'} />
             <Button disabled={!canFinalise} onPress={print} title="Print review sheet" variant="secondary" />
           </View>
         </View>
@@ -195,6 +203,7 @@ export default function ApplicationAutofillScreen({ navigation, route }: Props) 
         </View>
       </Card> : null}
 
+      <Button title="Edit source application data" variant="secondary" onPress={() => navigation.navigate('ApplicationCaseForm', {clientId:route.params.clientId,applicationCaseId:route.params.applicationCaseId})} />
       <EditSection title="Application" fields={[
         ['Police station / DFO', 'policeStation'], ['Application reference', 'applicationReference'], ['Motivation summary', 'motivationSummary', true],
       ]} values={values} setField={setField} />
