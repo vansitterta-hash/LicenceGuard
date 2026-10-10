@@ -1,5 +1,6 @@
 import { finishPendingDraftSaves } from '../utils/draftSaveQueue';
 import { acceptPasswordRecovery, isPasswordRecoveryUrl } from '../services/passwordService';
+import { registerAccount as createAccount, type RegistrationDetails } from '../services/registrationService';
 import {
   createContext,
   ReactNode,
@@ -23,6 +24,8 @@ type AuthContextValue = {
   user: User | null;
   dealerProfile: DealerProfile | null;
   loading: boolean;
+  registering: boolean;
+  registerAccount: (details: RegistrationDetails) => Promise<void>;
   recovery: boolean;
   recoveryError: string | null;
   finishRecovery: () => Promise<void>;
@@ -57,6 +60,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [dealerProfile, setDealerProfile] =
     useState<DealerProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [registering, setRegistering] = useState(false);
 
   const loadDealerProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -188,6 +192,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
+  const registerAccount = async (details: RegistrationDetails) => {
+    setRegistering(true);
+    try {
+      await createAccount(details);
+    } finally {
+      // A confirmation-disabled signup can emit SIGNED_IN before local logout.
+      // Keep the registration screen mounted until explicit login is requested.
+      setSession(null);
+      setDealerProfile(null);
+      setRegistering(false);
+    }
+  };
+
   const signIn = async (email: string, password: string) => {
     setLoading(true);
 
@@ -252,10 +269,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user: session?.user ?? null,
       dealerProfile,
       loading,
+      registering,
+      registerAccount,
       signIn,
       signOut,
     }),
-    [dealerProfile, loading, session, recovery, recoveryError]
+    [dealerProfile, loading, session, recovery, recoveryError, registering]
   );
 
   return (

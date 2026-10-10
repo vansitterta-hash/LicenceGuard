@@ -20,9 +20,16 @@ import { useAuth } from '../context/AuthContext';
 import { Colors } from '../theme/colors';
 
 export default function LoginScreen() {
-  const { signIn, loading } = useAuth();
+  const { signIn, registerAccount, loading } = useAuth();
 
   const [email, setEmail] = useState('');
+  const [registering, setRegistering] = useState(false);
+  const [registrationBusy, setRegistrationBusy] = useState(false);
+  const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState('');
+  const [surname, setSurname] = useState('');
+  const [idNumber, setIdNumber] = useState('');
+  const [confirmation, setConfirmation] = useState('');
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const forgotPassword = async () => {
@@ -38,6 +45,19 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
 
   const handleLogin = async () => {
+    if (registrationBusy || loading) return;
+    if (registering) {
+      setRegistrationBusy(true);
+      setRegistrationMessage(null);
+      try {
+        await registerAccount({ firstName, surname, idNumber, email, password, confirmation });
+        setRegistering(false); setPassword(''); setConfirmation(''); setIdNumber('');
+        setRegistrationMessage('Check your inbox for an email confirmation if required, then sign in. If you already have an account, sign in or use Forgot Password.');
+      } catch (error) {
+        setRegistrationMessage(error instanceof Error ? error.message : 'Unable to create your account.');
+      } finally { setRegistrationBusy(false); }
+      return;
+    }
     if (!email.trim() || !password) {
       Alert.alert(
         'Missing details',
@@ -93,7 +113,7 @@ export default function LoginScreen() {
               </Text>
 
               <Text style={styles.title}>
-                Sign in
+                {registering ? 'Create account' : 'Sign in'}
               </Text>
 
               <Text style={styles.description}>
@@ -101,6 +121,18 @@ export default function LoginScreen() {
                 firearm licences, expiry alerts and
                 application preparation workflows.
               </Text>
+
+              {registering ? <>
+                <Text style={styles.description}>Create your private workspace and profile. Complete the remaining details in Clients after signing in.</Text>
+                {[
+                  { label: 'First name', value: firstName, change: setFirstName },
+                  { label: 'Surname', value: surname, change: setSurname },
+                  { label: 'South African ID number', value: idNumber, change: setIdNumber },
+                ].map((field) => <View key={field.label} style={styles.fieldGroup}>
+                  <Text style={styles.label}>{field.label}</Text>
+                  <View style={styles.inputWrapper}><TextInput accessibilityLabel={field.label} style={styles.input} value={field.value} onChangeText={field.change} editable={!registrationBusy} keyboardType={field.label === 'South African ID number' ? 'number-pad' : 'default'} maxLength={field.label === 'South African ID number' ? 13 : 100} /></View>
+                </View>)}
+              </> : null}
 
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>
@@ -139,7 +171,7 @@ export default function LoginScreen() {
 
                   <TextInput
                     autoCapitalize="none"
-                    autoComplete="password"
+                    autoComplete={registering ? 'new-password' : 'password'}
                     onChangeText={setPassword}
                     onSubmitEditing={() => {
                       void handleLogin();
@@ -153,8 +185,14 @@ export default function LoginScreen() {
                 </View>
               </View>
 
+              {registering ? <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Confirm password</Text>
+                <View style={styles.inputWrapper}><TextInput accessibilityLabel="Confirm password" autoCapitalize="none" autoComplete="new-password" secureTextEntry style={styles.input} value={confirmation} onChangeText={setConfirmation} editable={!registrationBusy} /></View>
+                <Text style={styles.helpText}>Use at least 8 characters.</Text>
+              </View> : null}
+
               <Pressable
-                disabled={loading}
+                disabled={loading || registrationBusy}
                 onPress={() => {
                   void handleLogin();
                 }}
@@ -173,23 +211,21 @@ export default function LoginScreen() {
                 <View pointerEvents="none" style={styles.loginLowerBand} />
                 <View pointerEvents="none" style={styles.loginBottomEdge} />
 
-                {loading ? (
+                {loading || registrationBusy ? (
                   <ActivityIndicator
                     color={Colors.white}
                   />
                 ) : (
                   <Text style={styles.loginButtonText}>
-                    Sign in
+                    {registering ? 'Create account' : 'Sign in'}
                   </Text>
                 )}
               </Pressable>
 
-              <Pressable disabled={resetBusy || loading} onPress={() => void forgotPassword()}><Text style={styles.helpText}>{resetBusy ? 'Sending reset link...' : 'Forgot Password?'}</Text></Pressable>
+              {!registering ? <Pressable disabled={resetBusy || loading || registrationBusy} onPress={() => void forgotPassword()}><Text style={styles.helpText}>{resetBusy ? 'Sending reset link...' : 'Forgot Password?'}</Text></Pressable> : null}
               {resetMessage ? <Text accessibilityRole="alert" style={styles.helpText}>{resetMessage}</Text> : null}
-              <Text style={styles.helpText}>
-                Use an authorised LicenceGuard dealer
-                account.
-              </Text>
+              <Pressable disabled={loading || registrationBusy || resetBusy} onPress={() => { setRegistering(!registering); setRegistrationMessage(null); setResetMessage(null); setPassword(''); setConfirmation(''); }}><Text style={styles.helpText}>{registering ? 'Back to sign in' : 'Register / Create Account'}</Text></Pressable>
+              {registrationMessage ? <Text accessibilityRole="alert" style={styles.helpText}>{registrationMessage}</Text> : null}
             </View>
 
             <Text style={styles.footerText}>
