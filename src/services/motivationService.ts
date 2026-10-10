@@ -20,8 +20,12 @@ export function assertMotivationLinkage(s: MotivationSources, identity: Motivati
     throw new Error('Motivation source client/application/firearm/competency links are inconsistent.');
   }
   for (const record of [a, c, f, ...(k ? [k] : [])] as any[]) {
-    if (record.owner_user_id !== identity.userId || record.record_scope !== 'PRIVATE') throw new Error('Motivation requires the authenticated owner’s private source records.');
+    // Existing client/firearm records may have no owner. Their authenticated
+    // SELECT still requires RLS authorization; NULL is not an access grant.
+    const authorizedLegacySource = (record === c || record === f) && record.owner_user_id === null;
+    if ((!authorizedLegacySource && record.owner_user_id !== identity.userId) || record.record_scope !== 'PRIVATE') throw new Error('Motivation requires the authenticated owner’s private source records.');
   }
+  if (f.is_active !== true) throw new Error('The linked Motivation firearm must be active.');
   if (s.documents.some((d: any) => d.client_id !== c.id || d.dealer_id !== identity.dealerId || d.owner_user_id !== identity.userId || d.record_scope !== 'PRIVATE')) throw new Error('Document ownership/linkage is inconsistent.');
   if (!['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(a.application_type)
     || !['13', '15', '16', '17'].includes(a.licence_section ?? '')) throw new Error('This canonical Master applies to new firearm licence applications under Sections 13/15/16/17.');
@@ -30,12 +34,15 @@ export function assertMotivationLinkage(s: MotivationSources, identity: Motivati
 export async function loadMotivationSources(identity: MotivationIdentity): Promise<MotivationSources> {
   const session = await supabase.auth.getSession();
   if (session.error || session.data.session?.user.id !== identity.userId) throw new Error('Sign in as the application owner before preparing Motivation.');
-  const query = (table: string) => db.from(table).select('*').eq('dealer_id', identity.dealerId).eq('owner_user_id', identity.userId).eq('record_scope', 'PRIVATE');
+  const query = (table: string, ownerOnly = true) => {
+    const selection = db.from(table).select('*').eq('dealer_id', identity.dealerId).eq('record_scope', 'PRIVATE');
+    return ownerOnly ? selection.eq('owner_user_id', identity.userId) : selection;
+  };
   const app = await query('application_cases').eq('id', identity.applicationCaseId).eq('client_id', identity.clientId).single();
   if (app.error || !app.data?.firearm_id) throw new Error('The authorized application and linked firearm are required.');
   const results = await Promise.all([
-    query('clients').eq('id', identity.clientId).single(),
-    query('firearms').eq('id', app.data.firearm_id).eq('client_id', identity.clientId).eq('is_active', true).single(),
+    query('clients', false).eq('id', identity.clientId).single(),
+    query('firearms', false).eq('id', app.data.firearm_id).eq('client_id', identity.clientId).eq('is_active', true).single(),
     query('competencies').eq('client_id', identity.clientId),
     query('documents').eq('client_id', identity.clientId),
   ]);

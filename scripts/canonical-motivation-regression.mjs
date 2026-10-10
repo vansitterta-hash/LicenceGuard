@@ -99,6 +99,9 @@ for (const change of [s => { s.firearm.serial_number = 'changed'; }, s => { s.ap
 // Exercise the real registration helper and Motivation lifecycle against an offline RLS model.
 const tables = { clients: [structuredClone(client)], application_cases: [structuredClone(application)], firearms: [structuredClone(firearm)], firearm_licences: [], competencies: [structuredClone(competency)], documents: structuredClone(documents) };
 const storedFiles = new Map(); let currentUser = 'owner', seq = 0;
+// Explicit offline RLS grants model already-authorized legacy records. NULL
+// ownership alone never makes a row visible to the authenticated caller.
+const legacySourceGrants = new Set();
 const smallPdf = await PDFDocument.create(); smallPdf.addPage(); const pdfBytes = await smallPdf.save();
 for (const d of documents) storedFiles.set(d.storage_path, pdfBytes);
 const db = {
@@ -113,7 +116,7 @@ const db = {
       insert(value) { payload = value; mode = 'insert'; return q; },
       update(value) { payload = value; mode = 'update'; return q; },
       async then(resolve) {
-        const visible = tables[table].filter(row => row.owner_user_id === currentUser && filters.every(f => f(row)));
+        const visible = tables[table].filter(row => (row.owner_user_id === currentUser || legacySourceGrants.has(`${currentUser}:${table}:${row.id}`)) && filters.every(f => f(row)));
         if (mode === 'insert') {
           assert.equal(returning, false, 'secure registration avoids INSERT RETURNING');
           if (payload.owner_user_id !== currentUser || payload.record_scope !== 'PRIVATE') return resolve({ error: { message: 'RLS' } });
@@ -133,6 +136,41 @@ const motivationRequirement = async () => (await readinessService.getClientAppli
 service.assertMotivationLinkage(sources, identity);
 for (const change of [s => { s.application.client_id = 'foreign'; }, s => { s.firearm.client_id = 'foreign'; }, s => { s.firearm.owner_user_id = 'other'; }, s => { s.competency.id = 'foreign'; }]) { const s = structuredClone(sources); change(s); assert.throws(() => service.assertMotivationLinkage(s, identity), /inconsistent|owner/); }
 const originalFetch = globalThis.fetch;
+
+// Reproduce physical defect 01: RLS-visible PRIVATE client/firearm with NULL owners.
+tables.clients[0].owner_user_id = null; tables.firearms[0].owner_user_id = null;
+legacySourceGrants.add('owner:clients:client'); legacySourceGrants.add('owner:firearms:firearm');
+const legacySources = await service.loadMotivationSources(identity);
+assert.equal(legacySources.client.owner_user_id, null);
+assert.equal(legacySources.firearm.owner_user_id, null);
+assert.equal((await service.getMotivationWorkspace(identity)).state, 'NOT_GENERATED');
+for (const key of ['owner:clients:client', 'owner:firearms:firearm']) {
+  legacySourceGrants.delete(key);
+  await assert.rejects(service.loadMotivationSources(identity), /authorized Motivation source/);
+  legacySourceGrants.add(key);
+}
+for (const [record, field, value] of [
+  [tables.clients[0], 'dealer_id', 'foreign'],
+  [tables.firearms[0], 'client_id', 'foreign'],
+  [tables.firearms[0], 'dealer_id', 'foreign'],
+  [tables.firearms[0], 'is_active', false],
+  [tables.clients[0], 'record_scope', 'SHARED'],
+]) {
+  const before = record[field]; record[field] = value;
+  await assert.rejects(service.loadMotivationSources(identity), /authorized Motivation source/);
+  record[field] = before;
+}
+currentUser = 'other';
+await assert.rejects(service.loadMotivationSources(identity), /Sign in/);
+await assert.rejects(service.loadMotivationSources({ ...identity, userId: 'other' }), /authorized application/);
+currentUser = 'owner';
+const savedCompetencies = tables.competencies, savedDocuments = tables.documents;
+tables.competencies = []; tables.documents = [];
+const missingOptional = await service.loadMotivationSources(identity);
+assert.equal(missingOptional.competency, null); assert.deepEqual(missingOptional.documents, []);
+assert.ok(engine.motivationReleaseIssues(missingOptional, engine.defaultMotivationReview(missingOptional)).length > 0);
+tables.competencies = savedCompetencies; tables.documents = savedDocuments;
+// Keep legacy ownership through the lifecycle below: outputs must still be owner-private.
 globalThis.fetch = async url => String(url).startsWith('/templates/') ? new Response(master) : String(url).startsWith('mock:') && storedFiles.has(String(url).slice(5)) ? new Response(storedFiles.get(String(url).slice(5))) : new Response('', { status: 404 });
 try {
   const first = await service.generateMotivation(identity, review);
