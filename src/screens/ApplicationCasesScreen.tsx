@@ -582,7 +582,7 @@ function ApplicationCaseCard({
       {applicationCase.dealer_notes ? (
         <View style={styles.notesBlock}>
           <Text style={styles.notesLabel}>
-            Dealer notes
+            Application notes
           </Text>
 
           <Text style={styles.notesText}>

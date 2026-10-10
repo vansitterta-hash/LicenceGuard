@@ -268,7 +268,7 @@ export default function ClientFormScreen({
     if (!dealerProfile?.dealerId || !user?.id) {
       Alert.alert(
         'Account error',
-        'Your dealer account could not be identified.'
+        'Your workspace could not be identified.'
       );
       return;
     }
@@ -425,7 +425,7 @@ export default function ClientFormScreen({
       </Card>
 
       <Card
-        subtitle="Used for renewal reminders and dealer follow-up."
+        subtitle="Used for renewal reminders and follow-up."
         title="Contact details"
       >
         <View
@@ -694,8 +694,8 @@ export default function ClientFormScreen({
       </Card>
 
       <Card
-        subtitle="Internal notes visible to authorised dealer users."
-        title="Dealer notes"
+        subtitle="Additional notes for this profile."
+        title="Profile notes"
       >
         <TextField
           label="Notes"

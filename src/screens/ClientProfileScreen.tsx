@@ -697,7 +697,7 @@ export default function ClientProfileScreen({
 
       <Saps271DeclarationsSection value={client.saps271_declarations} />
       {client.notes ? (
-        <Card title="Dealer or consultant notes">
+        <Card title="Profile notes">
           <Text style={styles.notesText}>
             {client.notes}
           </Text>

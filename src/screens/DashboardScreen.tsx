@@ -157,7 +157,7 @@ export default function DashboardScreen({
         style={styles.heroCard}
       >
         <Text style={styles.eyebrow}>
-          DEALER APPLICATION WORKSPACE
+          MY LICENCEGUARD WORKSPACE
         </Text>
 
         <Text style={styles.heroTitle}>
@@ -169,7 +169,7 @@ export default function DashboardScreen({
 
         <Text style={styles.dealerName}>
           {dealerProfile?.dealerName ??
-            'LicenceGuard Dealer'}
+            'LicenceGuard Workspace'}
         </Text>
 
         <Text style={styles.heroText}>

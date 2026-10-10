@@ -226,7 +226,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
   const compileApplicationPack = async () => {
     if (!dealerProfile?.dealerId || !user?.id || !applicationCase) {
-      Alert.alert('Unable to compile application', 'The signed-in dealer or application context is missing.');
+      Alert.alert('Unable to compile application', 'The signed-in workspace or application context is missing.');
       return;
     }
 
