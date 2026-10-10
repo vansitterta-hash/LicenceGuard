@@ -336,6 +336,9 @@ export async function prepareSuggestedApplicationDocuments(input: {
 
   let added = 0;
   for (const suggestion of input.suggestions) {
+    // Historical reference motivations remain research/reference material;
+    // new-licence motivations are populated from the locked canonical Master.
+    if (suggestion.kind === 'MOTIVATION' && ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(input.context.applicationType) && ['13', '15', '16', '17'].includes(input.context.licenceSection ?? '')) continue;
     if (existingIds.has(suggestion.item.id)) continue;
 
     await addReferenceDocumentToClient({

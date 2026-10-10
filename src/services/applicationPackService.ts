@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { assertCurrentMotivationReleased } from './motivationService';
 import { assertApplicationTypeSupportedInBeta } from '../utils/unsupportedApplicationTypePolicy';
 import { assertRequiredDigitalDocumentMerged } from '../utils/applicationPackPolicy';
 import { getClientApplicationReadiness } from './applicationReadinessService';
@@ -793,6 +794,12 @@ export async function generateAndArchiveApplicationPack(input: {
     throw new Error(`The final application pack cannot be generated yet. ${manifest.blockingReasons.join(' ') || 'Resolve verification warnings first.'}`);
   }
 
+  const selectedMotivation = manifest.items.find(item => item.documentType === 'MOTIVATION')?.document;
+  if (['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(manifest.applicationType) && ['13', '15', '16', '17'].includes(manifest.licenceSection ?? '')) {
+    if (!selectedMotivation) throw new Error('Generate and confirm the current canonical Motivation before releasing this pack.');
+    await assertCurrentMotivationReleased(input, selectedMotivation.id);
+  }
+
   // Match the official renderer: Metro's ES entry hits tslib 1.x default interop.
   const pdfLib = await import('pdf-lib/cjs/index.js');
   const pdf = await pdfLib.PDFDocument.create();
@@ -826,6 +833,8 @@ export async function generateAndArchiveApplicationPack(input: {
   }
 
   const bytes = await pdf.save();
+  // The merge may take time. Reject a source edit/regeneration before releasing bytes.
+  if (selectedMotivation?.metadata?.motivationMappingVersion) await assertCurrentMotivationReleased(input, selectedMotivation.id);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeSubject = manifest.subject.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/_+/g, '_').slice(0, 70) || 'application';
   const fileName = `APPLICATION_PACK_${safeSubject}_${timestamp}.pdf`;
@@ -894,6 +903,8 @@ export async function generateAndArchiveApplicationPack(input: {
     // Registration has committed; retain its PDF on a read-back failure.
     throw new Error(`The application pack was saved, but could not be read back. Reload the application before compiling again. ${saved.error?.message ?? 'No authorized document returned.'}`);
   }
+
+  if (selectedMotivation?.metadata?.motivationMappingVersion) await assertCurrentMotivationReleased(input, selectedMotivation.id);
 
   const statusUpdate = await db.from('application_cases').update({
     status: 'READY_FOR_SUBMISSION',

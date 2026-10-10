@@ -416,6 +416,9 @@ export async function setDocumentVerified(
     const selected = await db.from('documents').select('*').eq('id',documentId).single();
     if (selected.error || !selected.data) throw new Error(selected.error?.message ?? 'Document is unavailable.');
     const document = selected.data as DocumentRecord;
+    if (document.document_type === 'MOTIVATION' && document.metadata?.motivationMappingVersion) {
+      throw new Error('Review and confirm the current canonical Motivation in the application workspace. Generic verification cannot release it.');
+    }
     if (isGenerated271(document) && document.application_case_id) {
       const documents = await listClientDocuments(document.client_id);
       const current = currentGenerated271(documents,document.application_case_id);

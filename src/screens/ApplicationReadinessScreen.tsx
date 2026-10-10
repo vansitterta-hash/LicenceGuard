@@ -32,6 +32,7 @@ import {
 
 import Button from '../components/Button';
 import Card from '../components/Card';
+import MotivationReviewPanel from '../components/application/MotivationReviewPanel';
 import ReadOnlyIntelligencePanel from '../components/intelligence/ReadOnlyIntelligencePanel';
 import Screen from '../components/Screen';
 import { useAuth } from '../context/AuthContext';
@@ -916,6 +917,9 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
         </View>
       </Card>
 
+      {dealerProfile?.dealerId && user?.id && ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.applicationType) && ['13', '15', '16', '17'].includes(applicationCase.licenceSection ?? '') && (
+        <MotivationReviewPanel identity={{ dealerId: dealerProfile.dealerId, userId: user.id, clientId: route.params.clientId, applicationCaseId: applicationCase.caseId }} onChanged={loadData} />
+      )}
       <Card
         title="Application documents"
         subtitle="Review, preview or replace the required documents without searching through the full client library."

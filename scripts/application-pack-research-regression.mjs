@@ -31,7 +31,8 @@ const sourceDocument = {
   },
 };
 const applicationCase = {
-  id: 'case-1', client_id: 'client-1', application_type: 'FIREARM_LICENCE_FIRST_APPLICATION',
+  // Isolate existing research conversion/pack behavior from the new-licence canonical gate.
+  id: 'case-1', client_id: 'client-1', application_type: 'FIREARM_LICENCE_RENEWAL',
   status: 'READY_FOR_SUBMISSION', competency_id: null, firearm_id: 'firearm-1',
   firearm_licence_id: null, licence_section: '15', subjectDescription: 'Winchester 20 gauge',
 };

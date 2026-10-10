@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { canonicalMotivationForCase } from './motivationService';
 import { declarationReadinessIssues } from '../utils/saps271Declarations';
 import { saps517RequiredProfileIssues } from '../utils/saps517Applicant';
 import { evaluateApplicationForm } from '../utils/applicationFormAnswers';
@@ -332,6 +333,8 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const current271 = is271 ? currentGenerated271(documents,applicationCase.id) : undefined;
     const source271 = current271 ? await buildApplicationAutofillPackage(clientId,applicationCase.id) : undefined;
     const generated271State = saps271GeneratedState(current271,source271 ? saps271SourceSnapshot({data:source271,reviewValues:createReviewValues(source271)}) : '');
+    const usesCanonicalMotivation = is271 && ['13', '15', '16', '17'].includes(section);
+    const canonicalMotivation = usesCanonicalMotivation ? await canonicalMotivationForCase(applicationCase.id, documents) : null;
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;
       let documentId: string | undefined;
@@ -381,6 +384,11 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
         }
       }
       const generated271 = is271 && definition.documentType === 'FIREARM_LICENCE_APPLICATION_FORM' && (current271 || !documentId);
+      if (usesCanonicalMotivation && definition.documentType === 'MOTIVATION') {
+        documentId = canonicalMotivation?.current.id;
+        state = canonicalMotivation?.state === 'CONFIRMED' ? 'SATISFIED' : canonicalMotivation?.state === 'AWAITING_REVIEW' ? 'UNVERIFIED' : 'PENDING_GENERATION';
+        definition.detail = canonicalMotivation?.state === 'OUTDATED' ? 'Motivation source data changed. Correct, regenerate, review and confirm the current version.' : 'Generate and review the canonical application-specific Motivation in this application workspace.';
+      }
       if (generated271) {
         documentId = current271?.id;
         state = generated271State === 'CONFIRMED' ? 'SATISFIED' : generated271State === 'AWAITING_REVIEW' ? 'UNVERIFIED' : 'PENDING_GENERATION';
