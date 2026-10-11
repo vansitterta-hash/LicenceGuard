@@ -22,7 +22,7 @@ for (const token of requiredSql) {
 }
 
 assert.doesNotMatch(workspaceEvents, /dealer_memberships/);
-assert.match(workspaceEvents, /join public\.dealer_users du/);
+assert.match(workspaceEvents, /is_record_authorized_for_user/);
 assert.match(authTypes, /WORKSPACE_KINDS/);
 assert.match(authTypes, /DEALER_USER_ROLES/);
 assert.match(authTypes, /RECORD_SCOPES/);
