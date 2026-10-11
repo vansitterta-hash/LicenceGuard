@@ -8,7 +8,7 @@ import { userAlert as Alert } from '../../utils/userAlert';
 import { openExternalDocument } from '../../utils/openExternalDocument';
 import { createDocumentSignedUrl } from '../../services/documentService';
 import { assertCurrentMotivationReleased, confirmMotivation, generateMotivation, getMotivationWorkspace, markMotivationReviewed, saveMotivationCorrections, type MotivationIdentity } from '../../services/motivationService';
-import { applicableMotivationEvidence, MASTER_ASSERTIONS, motivationResearchSources } from '../../engines/canonicalMotivationEngine';
+import { applicableMotivationEvidence, MASTER_ASSERTIONS, motivationResearchSources, motivationResearchRuns } from '../../engines/canonicalMotivationEngine';
 import { stableMotivationJson } from '../../utils/motivationGeneratedState';
 import { COLLECTOR_CLAIM_SECTIONS, type MotivationReview } from '../../types/motivation';
 
@@ -37,6 +37,9 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
   const dirty = stableMotivationJson(review) !== stableMotivationJson(workspace.review);
   const evidence = applicableMotivationEvidence(workspace.sources);
   const research = motivationResearchSources(workspace.sources);
+  const runs = motivationResearchRuns(workspace.sources);
+  const currentSources = runs.current?.sources ?? [];
+  const previousSources = runs.previous.flatMap(run => run.sources);
   const eligibleClaims = review.claims.filter(c => c.reviewed && c.text.trim() && research.some(s => s.documentId === c.documentId && s.id === c.sourceId && c.sourceSnapshot === stableMotivationJson(s)));
   const researchDocuments = workspace.sources.documents.filter(d => d.document_type === 'SUPPORTING_RESEARCH');
   const excludedResearch = researchDocuments.filter(d => !research.some(s => s.documentId === d.id));
@@ -62,12 +65,15 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
     {research.length === 0 && <Text style={textStyle}>No eligible source publications are available for this firearm and application. Use the existing application Research workflow, review its sources, then reload here. Research PDFs or summaries alone are not confirmed claims.</Text>}
     {excludedResearch.map(d => <Text key={d.id} style={textStyle}>Excluded Research: {d.document_name} — inactive, different application/firearm context, or missing usable source metadata. It is not included in the Motivation.</Text>)}
     {review.claims.some(c => !research.some(s => s.documentId === c.documentId && s.id === c.sourceId)) && <Button disabled={busy} title="Remove claims whose Research sources are no longer available" onPress={() => update({ claims: review.claims.filter(c => research.some(s => s.documentId === c.documentId && s.id === c.sourceId)) })} />}
-    {research.map(source => {
+    <Text style={textStyle}>Current Research — latest successful run: {runs.current?.generatedAt ?? 'No dated current run'}. Source publications: {currentSources.length}. New sources require explicit claim review; earlier approvals are not transferred.</Text>
+    {[...currentSources, ...previousSources].map((source, index) => {
       const claim = review.claims.find(c => c.documentId === source.documentId && c.sourceId === source.id);
       const sourceSnapshot = stableMotivationJson(source);
       const claimReviewed = claim?.reviewed && claim.sourceSnapshot === sourceSnapshot;
       const change = (patch: Partial<NonNullable<typeof claim>>) => update({ claims: [...review.claims.filter(c => !(c.documentId === source.documentId && c.sourceId === source.id)), { documentId: source.documentId, sourceId: source.id, text: claim?.text ?? source.summary ?? '', section: claim?.section ?? 'Firearm relevance', reviewed: claim?.reviewed ?? false, ...patch }] });
       return <View key={`${source.documentId}:${source.id}`}>
+        {index === currentSources.length && previousSources.length > 0 && <Text style={textStyle}>Previous Research / Research history — retained separately from Current Research. Existing reviewed claims keep their original provenance and review state.</Text>}
+        <Text style={textStyle}>{source.documentId === runs.current?.document.id ? 'Current Research' : 'Previous Research'} · Run: {([runs.current, ...runs.previous].find(run => run?.document.id === source.documentId))?.generatedAt ?? 'Date unavailable'}</Text>
         <Text style={textStyle}>{source.title} — {claimReviewed && claim?.text.trim() ? 'Reviewed claim eligible for inclusion' : 'Claim requires review; excluded until reviewed'}</Text>
         <Button title="Open original Research source" disabled={busy} variant="ghost" onPress={() => void run(() => openExternalDocument(() => source.url!, { originatingRoute: 'ApplicationReadiness', workflowStep: 'motivation-research' }), false)} />
         <TextField editable={!busy} label="Supported claim" multiline maxLength={3000} value={claim?.text ?? source.summary ?? ''} onChangeText={text => change({ text, reviewed: false })} />

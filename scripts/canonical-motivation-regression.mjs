@@ -109,6 +109,26 @@ assert.throws(() => engine.motivationAnnexures(sources, { ...review, evidenceIds
 const claim = { documentId: 'research', sourceId: 'source', text: 'A source-supported test characteristic.', section: 'Firearm relevance', reviewed: true };
 claim.sourceSnapshot = state.stableMotivationJson(engine.motivationResearchSources(sources)[0]);
 const researched = { ...review, claims: [claim] };
+// A new successful run changes candidates, never historical approvals or rows.
+const rerunSources = structuredClone(sources);
+rerunSources.documents.at(-1).metadata.researchContext = { generatedAt: '2026-10-10T09:00:00Z', discipline: 'Trap', provider: 'EXTERNAL_PROVIDER' };
+rerunSources.documents.at(-1).metadata.researchSources.push({ id: 'old-unreviewed', title: 'Historical unreviewed source', url: 'https://example.test/old-unreviewed', summary: 'Earlier unreviewed excerpt.' });
+const newRun = evidence('new-research', 'SUPPORTING_RESEARCH', { firearm_id: 'firearm', is_verified: false, created_at: '2026-10-10T08:00:00Z', metadata: { researchContext: { generatedAt: '2026-10-10T12:00:00Z', discipline: 'Trap', provider: 'EXTERNAL_PROVIDER' }, researchSources: [{ id: 'new-source', title: 'New source publication', url: 'https://example.test/new', summary: 'Unreviewed new-run excerpt.' }] } });
+rerunSources.documents.push(newRun);
+const retainedBefore = JSON.stringify(rerunSources), claimsBefore = JSON.stringify(researched);
+const runs = engine.motivationResearchRuns(rerunSources);
+assert.equal(runs.current.document.id, 'new-research', 'run timestamp outranks document creation order');
+assert.deepEqual(runs.current.sources.map(source => source.id), ['new-source']);
+assert.ok(runs.previous.some(run => run.sources.some(source => source.id === 'source')));
+assert.ok(runs.previous.some(run => run.sources.some(source => source.id === 'old-unreviewed')));
+assert.equal(engine.reviewedMotivationClaims(rerunSources, researched)[0].source.documentId, 'research');
+assert.equal(JSON.stringify(researched), claimsBefore, 'historical claim review/linkage not rewritten');
+assert.equal(JSON.stringify(rerunSources), retainedBefore, 'no Research row deleted or mutated');
+assert.equal(engine.reviewedMotivationClaims(rerunSources, researched).some(c => c.sourceId === 'new-source'), false);
+const fallbackRun = structuredClone(newRun); fallbackRun.metadata.researchContext.generatedAt = 'invalid'; fallbackRun.metadata.researchSources[0].retrievalDate = '2026-10-10T13:00:00Z';
+assert.equal(engine.motivationResearchRuns({ ...rerunSources, documents: [...rerunSources.documents.slice(0, -1), fallbackRun] }).current.generatedAt, '2026-10-10T13:00:00.000Z');
+const wrongDiscipline = structuredClone(newRun); wrongDiscipline.metadata.researchContext.discipline = 'Skeet';
+assert.equal(engine.motivationResearchRuns({ ...rerunSources, documents: [...rerunSources.documents.slice(0, -1), wrongDiscipline] }).current.document.id, 'research');
 assert.match(await textOf(await engine.populateCanonicalMotivation(master, sources, researched, '2026-10-10')), /source-supported test characteristic.*Test manufacturer specification/s);
 assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, sources, { ...researched, claims: [{ ...claim, reviewed: false }] }, '2026-10-10')), /source-supported test characteristic/);
 assert.throws(() => engine.reviewedMotivationClaims(sources, { ...review, claims: [{ ...claim, sourceId: 'invented' }] }), /Research source/);
@@ -295,7 +315,7 @@ try {
 
 // Bounded UI flow: preview + explicit confirmation, edits force regeneration.
 const harness = hookHarness(); let uiGenerated = 0, uiConfirmed = 0, uiPreviewed = 0;
-let uiWorkspace = { sources, review: structuredClone(review), current: evidence('ui-current', 'MOTIVATION', { version_number: 1 }), state: 'AWAITING_REVIEW', issues: [], history: [] };
+let uiWorkspace = { sources: rerunSources, review: structuredClone(researched), current: evidence('ui-current', 'MOTIVATION', { version_number: 1 }), state: 'AWAITING_REVIEW', issues: [], history: [] };
 const panel = loader({
   react: harness.react, 'react-native': nativeMock,
   '../Button': { default: 'Button', __esModule: true }, '../Card': { default: 'Card', __esModule: true }, '../TextField': { default: 'TextField', __esModule: true },
@@ -312,6 +332,11 @@ const panel = loader({
   },
 })('src/components/application/MotivationReviewPanel.tsx').default;
 harness.mount(panel, { identity, onChanged: async () => {} }); await harness.settle();
+assert.match(JSON.stringify(harness.tree), /Current Research — latest successful run/);
+assert.match(JSON.stringify(harness.tree), /Previous Research \/ Research history/);
+const sourceReviewButtons = nodes(harness.tree).filter(n => n.type === 'Button' && n.props.title.includes('I reviewed the original source'));
+assert.equal(sourceReviewButtons.length, 3, 'current and retained historical sources remain accessible');
+assert.equal(sourceReviewButtons.filter(n => n.props.title.startsWith('✓ ')).length, 1, 'only the original historical approval is preserved; current and older unreviewed sources stay unreviewed');
 const button = title => nodes(harness.tree).find(n => n.type === 'Button' && n.props.title === title);
 assert.equal(button('Confirm current Motivation').props.disabled, true);
 button('Open generated Motivation for review').props.onPress(); await harness.settle(); assert.equal(uiPreviewed, 1);

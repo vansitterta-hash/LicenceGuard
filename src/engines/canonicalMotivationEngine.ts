@@ -62,6 +62,27 @@ export function defaultMotivationReview(s: MotivationSources): MotivationReview 
   return { background, narrative: s.application.motivation_summary ?? '', evidenceIds: applicableMotivationEvidence(s).slice(0, 26).map(d => d.id), claims: [], assertions: {},
     collector: { category: '', field: '', theme: '', subTheme: '', membership, approvalDocumentId: '', photographDocumentId: '', themeFit: '', points: '', regulation15: '', confirmed: false, legalReviewed: false } };
 }
+
+/** Read-only run grouping. Claim validation continues using all eligible sources,
+ * so a rerun cannot rewrite or invalidate a reviewed historical claim by itself.
+ */
+export function motivationResearchRuns(s: MotivationSources) {
+  const sources = motivationResearchSources(s);
+  const timestamp = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
+  const runs = s.documents.filter(d => sources.some(source => source.documentId === d.id)).map(document => {
+    const context = document.metadata.researchContext as { generatedAt?: string; discipline?: string; provider?: string; sources?: { retrievalDate?: string }[] } | undefined;
+    const raw = document.metadata.researchSources ?? context?.sources ?? [];
+    const retrieved = Array.isArray(raw) ? Math.max(0, ...raw.map(source => timestamp(source.retrievalDate))) : 0;
+    const generated = timestamp(context?.generatedAt) || retrieved || timestamp(document.created_at);
+    const discipline = context?.discipline?.trim().toLowerCase();
+    const currentDiscipline = s.application.sport_discipline?.trim().toLowerCase();
+    const matchesContext = !discipline || !currentDiscipline || currentDiscipline === discipline || currentDiscipline.includes(discipline);
+    const live = document.metadata.source === 'EXTERNAL_RESEARCH_PROVIDER' || context?.provider === 'EXTERNAL_PROVIDER' || Array.isArray(document.metadata.researchSources);
+    return { document, generatedAt: generated ? new Date(generated).toISOString() : null, generated, matchesContext, live, sources: sources.filter(source => source.documentId === document.id) };
+  }).sort((a, b) => b.generated - a.generated || b.document.created_at.localeCompare(a.document.created_at) || b.document.id.localeCompare(a.document.id));
+  const current = runs.find(run => run.live && run.matchesContext) ?? null;
+  return { current, previous: runs.filter(run => run !== current) };
+}
 export function motivationAnnexures(s: MotivationSources, review: MotivationReview): MotivationAnnexure[] {
   const allowed = new Map(applicableMotivationEvidence(s).map(d => [d.id, d]));
   const ids = [...new Set(review.evidenceIds)].sort();
