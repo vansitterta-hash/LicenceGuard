@@ -154,15 +154,20 @@ try {
     publication('firearm-help', 'Firearm help and dedicated status', 'Our firearm help service provides licensing assistance for Section 16 applicants. Skeet Shotgun Hunting Equipment'),
     publication('hunting-menu', 'Hunting and shotgun Skeet information', 'Membership Events Training Bookings News Downloads Branches Competitions Rifle Pistol Shotgun Skeet Hunting Conservation Gallery Sponsors Shop Calendar Resources. Skeet competition requires shotguns to engage crossing clay targets.'),
     publication('other-category', 'CZ rifle technical specifications', 'The CZ rifle has a technical action designed for hunting and sporting competition. Shotgun Skeet'),
+    publication('generic-shooting', 'SA Hunters shooting', 'Shooting activities and firearms information for hunters and members.'),
+    publication('other-make', 'Shotgun specifications', 'Manufacturer: Beretta. 12 gauge shotgun technical specifications and sporting suitability.'),
   ];
   const natshoot = publication('natshoot', 'Natshoot shotgun Skeet competition', 'Skeet rules require shotguns to engage crossing clay targets from specified stations with approved equipment. Competitors must follow shotgun safety rules on the range.' );
   const hunting = publication('shotgun-hunting', '12 bore shotgun hunting use', 'A 12 bore shotgun can be used for hunting game birds with suitable ammunition and chokes. Hunting shotguns should use patterns appropriate to the game and distance.');
-  const cz = publication('cz-shotgun', 'CZ 12 bore shotgun technical characteristics', 'The CZ 12 bore shotgun has documented barrel specifications and interchangeable chokes for sporting and hunting use.');
+  const cz = publication('cz-shotgun', 'CZ shotgun production history', '12Ga barrel specifications. Manufacturer production background.');
+  const gaugeSkeet = publication('gauge-skeet', '12-gauge Skeet equipment', '12Ga equipment rules for Skeet competition.');
+  const shortHunting = publication('short-hunting', 'Shotgun hunting suitability', '12-bore chokes and game-bird hunting use.');
   const dualPurpose = { ...caseBody, discipline: 'Skeet AND hunting' };
-  resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, hunting]];
+  resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, hunting, gaugeSkeet, shortHunting]];
   const physical = createResponse(); await handler(request(dualPurpose), physical);
   assert.equal(physical.statusCode, 200);
-  assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url]));
+  assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url, gaugeSkeet.url, shortHunting.url]));
+  assert.equal(physical.body.sourceCount, 5, 'short descriptive excerpts qualify without every context term or a prescribed verb');
   assert.equal(physical.body.sources[0].url, cz.url, 'qualified firearm discovery retains its balanced slot');
   assert.ok(physical.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && !s.reviewed && !s.approved));
   assert.equal(Object.hasOwn(physical.body, 'claims'), false);
@@ -174,6 +179,13 @@ try {
   resultOverrides = [physicalFailures, physicalFailures];
   const allPoor = createResponse(); await handler(request(dualPurpose), allPoor);
   assert.equal(allPoor.body.sourceCount, 0, 'zero qualifying sources is valid');
+  const otherModel = publication('other-model', 'CZ shotgun specifications', 'Model: Different model. CZ 12 bore shotgun technical history.');
+  const otherDiscipline = publication('other-discipline', 'Shotgun competition rules', 'Discipline: Trap. 12 gauge shotgun equipment and competition rules.');
+  const sporting = publication('sporting', 'Shotgun sporting competition', 'Shotgun sporting competition equipment and target rules.');
+  resultOverrides = [[otherModel], [otherDiscipline, sporting]];
+  const conflicts = createResponse(); await handler(request({ ...dualPurpose, firearm: { ...dualPurpose.firearm, model: 'Recorded model' } }), conflicts);
+  assert.equal(conflicts.statusCode, 200);
+  assert.deepEqual(conflicts.body.sources.map(s => s.url), [sporting.url], 'identified model/discipline conflicts fail; substantive category competition research succeeds');
   console.log('Live research API auth, privacy filtering, server-only key, bounded search, and source mapping passed.');
 } finally {
   globalThis.fetch = previousFetch;

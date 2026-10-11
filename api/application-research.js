@@ -39,53 +39,63 @@ function subjectType(title, content, fields) {
   return 'GENERAL';
 }
 
+const RELEVANCE_THRESHOLD = 14;
 // Discovery relevance is not fact verification or claim approval. Evaluate only
 // the supplied title/excerpt; unrelated results never pad the source budget.
 function relevanceScore(source, fields, group) {
   const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const title = normalize(source.title), content = normalize(source.summary);
-  // Evaluate bounded prose passages, not the union of unrelated menu labels.
-  // Titles rank qualifying excerpts but cannot establish substantive relevance.
-  const passages = source.summary.split(/[.!?;\n|]+/).map(normalize).filter(Boolean);
+  const text = `${title} ${content}`;
   const contains = (haystack, value) => Boolean(value && (` ${haystack} `).includes(` ${normalize(value)} `));
   const category = /shotgun/i.test(fields.firearmType) ? 'shotgun'
     : /rifle/i.test(fields.firearmType) ? 'rifle'
       : /pistol|revolver|handgun/i.test(fields.firearmType) ? 'handgun' : normalize(fields.firearmType);
   const categoryMatch = text => contains(text, category) || contains(text, `${category}s`) || (category === 'handgun' && /\b(pistols?|revolvers?)\b/.test(text));
   const gaugeMatch = text => /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
-    ? /\b12 (?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
-  const wrongCategory = text => category === 'shotgun' && /\b(rifles?|pistols?|handguns?)\b/.test(text) && !categoryMatch(text);
-  if (wrongCategory(title)) return 0;
-  // A factual/rules/use relationship and at least eight words are required in
-  // the same passage as the subject. Keyword lists alone are not source evidence.
-  const prose = passages.filter(text => text.split(' ').length >= 8
-    && /\b(is|are|was|were|has|have|uses?|used|using|requires?|provides?|designed|manufactured|produced|features?|includes?|permits?|allows?|must|should|can)\b/.test(text)
-    && !wrongCategory(text));
-  const substantive = prose.filter(text => {
-    if (!categoryMatch(text)) return false;
-    if (group === 0) return (contains(text, fields.firearmMake) || contains(text, fields.firearmModel))
-      && /\b(specifications?|technical|barrels?|chokes?|action|production|history|manufactured|design|sporting|hunting)\b/.test(text);
-    const discipline = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
-    const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`);
-    return ((discipline.length ? discipline.some(value => contains(text, value)) : contains(text, fields.purpose)) || (hunting && /\bhunting\b/.test(text)))
-      && /\b(targets?|clays?|competition|rules?|equipment|barrels?|chokes?|game|hunting|sporting)\b/.test(text);
-  });
-  // Reject excerpts dominated by labels/navigation even if one passage qualifies.
-  const usefulWords = substantive.reduce((sum, text) => sum + text.split(' ').length, 0);
-  if (!substantive.length || usefulWords / Math.max(1, content.split(' ').length) < 0.5) return 0;
-  const text = substantive.join(' ');
-  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel), gauge = gaugeMatch(text);
-  if (group === 0) {
-    const titleIdentity = contains(title, fields.firearmMake) || contains(title, fields.firearmModel) || contains(title, category);
-    return 8 + Number(make) * 4 + Number(model) * 6 + Number(gauge) * 3
-      + Number(titleIdentity) * 5;
+    ? /\b12\s*(?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
+  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel);
+  const categoryFound = categoryMatch(text), gauge = gaugeMatch(text);
+  const technical = /\b(manufacturer|specifications?|technical|barrels?|chokes?|action|production|history|manufactured|design)\b/.test(content);
+  const disciplines = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
+  const discipline = disciplines.some(value => value !== 'hunting' && contains(text, value));
+  const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`) && /\bhunting\b/.test(text);
+  const use = /\b(targets?|clays?|competition|rules?|equipment|game|sporting|suitability|hunting)\b/.test(content);
+  // Additive evidence: no fixed sentence length, mandatory verb, same-passage
+  // conjunction or mandatory CZ/Section 16 term for useful category research.
+  // 14 requires several signals; context terms alone carry only one point.
+  let score = group === 0
+    ? Number(make) * 5 + Number(model) * 7 + Number(categoryFound) * 4 + Number(gauge) * 4 + Number(technical) * 5 + Number(use) * 2
+      + Number((make || model) && categoryFound && technical) * 4
+    : Number(categoryFound) * 4 + Number(gauge) * 4 + Number(discipline) * 6 + Number(hunting) * 3 + Number(use) * 6
+      + Number((categoryFound || gauge) && (discipline || hunting || /\b(competition|sporting)\b/.test(content)) && use) * 4;
+  if (group === 1 && disciplines.some(value => value !== 'hunting' && contains(title, value))) score += 2;
+  if (contains(text, fields.purpose) || contains(text, `Section ${fields.licenceSection}`)) score += 1;
+  // Conflicts outweigh every positive combination. Title subjects matter even
+  // when menus elsewhere mention the requested category.
+  const categories = ['shotgun', 'rifle', 'pistol', 'revolver', 'handgun'];
+  const conflict = value => categories.some(other => other !== category
+    && !(category === 'handgun' && ['pistol', 'revolver'].includes(other))
+    && new RegExp(`\\b${other}s?\\b`).test(value)) && !categoryMatch(value);
+  if (conflict(title) || conflict(content)) score -= 40;
+  const labelledIdentity = source.summary.match(/\b(?:manufacturer|make|model)\s*:\s*([^.;\n|]+)/i);
+  if (labelledIdentity) {
+    const recorded = /model/i.test(labelledIdentity[0].split(':')[0]) ? fields.firearmModel : fields.firearmMake;
+    if (recorded && !contains(normalize(labelledIdentity[1]), recorded)) score -= 40;
   }
-  const discipline = contains(text, fields.discipline);
-  const purpose = contains(text, fields.purpose);
-  const titleDiscipline = contains(title, fields.discipline);
-  return 8 + Number(titleDiscipline) * 6 + Number(discipline) * 3 + Number(categoryMatch(text)) * 4
-    + Number(purpose) * 2 + Number(contains(text, `Section ${fields.licenceSection}`))
-    + Number(/\.za(?:\/|$)/i.test(source.url));
+  const labelledDiscipline = source.summary.match(/\bdiscipline\s*:\s*([^.;\n|]+)/i);
+  if (labelledDiscipline && disciplines.length && !disciplines.some(value => contains(normalize(labelledDiscipline[1]), value))) score -= 40;
+  if (/\b(dedicated.*status|membership|member help|firearm help|licensing|licence application)\b/.test(title)) score -= 16;
+  // Structural quality penalties instead of an expanding menu-word blacklist:
+  // many short fragments, or long label lists dominating a small prose excerpt.
+  const passages = source.summary.split(/[.!?;\n|]+/).map(normalize).filter(Boolean);
+  const words = content.split(' ').length;
+  const proseWords = passages.filter(p => /\b(is|are|was|were|has|have|uses?|used|requires?|provides?|designed|features?|must|should|can)\b/.test(p))
+    .reduce((sum, p) => sum + p.split(' ').length, 0);
+  const shortFragments = passages.filter(p => p.split(' ').length < 5).length;
+  if ((passages.length >= 4 && shortFragments / passages.length >= 0.6)
+    || (words >= 25 && proseWords / words < 0.4 && !/\b\d+(?:\.\d+)?\s*(?:mm|cm|inch|inches|kg|lbs)\b/i.test(source.summary))
+    || /\b(home|menu)\b.*\b(contact|login|log in|privacy)\b/i.test(content)) score -= 24;
+  return score;
 }
 
 function consumeRequest(userId) {
@@ -202,7 +212,7 @@ export default async function handler(request, response) {
         publishedDate: boundedText(result.published_date, 80) || null,
       }];
     }).map(source => ({ source, score: relevanceScore(source, fields, group) }))
-      .filter(item => item.score > 0)
+      .filter(item => item.score >= RELEVANCE_THRESHOLD)
       .sort((a, b) => b.score - a.score)
       .map(item => item.source));
     // Alternate subjects within the existing six-source budget. Skip duplicate
