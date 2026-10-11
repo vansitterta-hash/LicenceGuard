@@ -39,9 +39,12 @@ function motivationSafeStatement(answers: ReturnType<typeof applicationFormAnswe
 }
 export function applicableMotivationEvidence(s: MotivationSources): DocumentRecord[] {
   const section = s.application.licence_section;
-  return s.documents.filter(d => d.client_id === s.client.id && d.dealer_id === s.client.dealer_id
+  const eligible = s.documents.filter(d => d.client_id === s.client.id && d.dealer_id === s.client.dealer_id
+    && (d as DocumentRecord & { owner_user_id?: string; record_scope?: string }).owner_user_id === (s.application as typeof s.application & { owner_user_id?: string }).owner_user_id
+    && (d as DocumentRecord & { record_scope?: string }).record_scope === 'PRIVATE'
     && d.lifecycle_status === 'ACTIVE' && d.is_verified && d.storage_path && EVIDENCE_TYPES.has(d.document_type)
-    && (!['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(d.document_type) || certificateValidity(d.expiry_date) === 'CURRENT')
+    && (d.document_type !== 'MEMBERSHIP_CERTIFICATE' || certificateValidity(d.expiry_date) === 'CURRENT')
+    && (d.document_type !== 'DEDICATED_STATUS' || d.expiry_date === null || certificateValidity(d.expiry_date) === 'CURRENT')
     && d.metadata?.category !== 'APPLICATION_PACK'
     && (!d.expiry_date || d.expiry_date >= new Date().toISOString().slice(0, 10))
     && ((d.document_type === 'ID_COPY' && d.client_id === s.client.id && d.dealer_id === s.client.dealer_id)
@@ -52,6 +55,12 @@ export function applicableMotivationEvidence(s: MotivationSources): DocumentReco
     && (section === '16' || d.document_type !== 'DEDICATED_STATUS')
     && (['15', '16', '17'].includes(section ?? '') || !['MEMBERSHIP_CERTIFICATE', 'GOOD_STANDING', 'ENDORSEMENT'].includes(d.document_type)))
     .sort((a, b) => a.id.localeCompare(b.id));
+  // An undated dedicated-status award is status evidence, not proof of current
+  // association standing. Require separately eligible membership and standing
+  // evidence; never promote NULL certificate expiry to CURRENT.
+  return eligible.filter(d => d.document_type !== 'DEDICATED_STATUS' || d.expiry_date !== null
+    || (eligible.some(e => e.document_type === 'MEMBERSHIP_CERTIFICATE')
+      && eligible.some(e => e.document_type === 'GOOD_STANDING')));
 }
 export function motivationResearchSources(s: MotivationSources): MotivationResearchSource[] {
   return s.documents.filter(d => d.lifecycle_status === 'ACTIVE' && d.document_type === 'SUPPORTING_RESEARCH'

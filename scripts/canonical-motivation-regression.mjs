@@ -44,6 +44,27 @@ expiredWithEvidence.competency.expiry_date = '2025-06-22';
 const remainingIssues = engine.motivationReleaseIssues(expiredWithEvidence, oldEvidenceReview);
 assert.ok(remainingIssues.includes('A verified current competency is required.'));
 assert.ok(!remainingIssues.some(issue => /dedicated-status and membership/.test(issue)));
+const statusWithoutExpiry = structuredClone(expiredWithEvidence);
+statusWithoutExpiry.documents.find(d => d.document_type === 'DEDICATED_STATUS').expiry_date = null;
+statusWithoutExpiry.documents.find(d => d.document_type === 'MEMBERSHIP_CERTIFICATE').expiry_date = '2027-09-12';
+statusWithoutExpiry.documents.push(evidence('current-standing', 'GOOD_STANDING'));
+assert.ok(engine.applicableMotivationEvidence(statusWithoutExpiry).some(d => d.document_type === 'MEMBERSHIP_CERTIFICATE'));
+assert.ok(engine.applicableMotivationEvidence(statusWithoutExpiry).some(d => d.document_type === 'DEDICATED_STATUS'));
+assert.ok(engine.applicableMotivationEvidence(statusWithoutExpiry).some(d => d.document_type === 'GOOD_STANDING'));
+assert.equal(statusWithoutExpiry.documents.find(d => d.document_type === 'DEDICATED_STATUS').expiry_date, null);
+assert.ok(!engine.motivationReleaseIssues(statusWithoutExpiry, oldEvidenceReview).some(issue => /dedicated-status and membership/.test(issue)));
+assert.ok(engine.motivationReleaseIssues(statusWithoutExpiry, oldEvidenceReview).includes('A verified current competency is required.'));
+for (const change of ['missing-standing', 'blank-membership', 'expired', 'unverified', 'owner', 'application']) {
+  const s = structuredClone(statusWithoutExpiry);
+  const d = s.documents.find(d => d.document_type === 'DEDICATED_STATUS');
+  if (change === 'missing-standing') s.documents = s.documents.filter(d => d.document_type !== 'GOOD_STANDING');
+  if (change === 'blank-membership') s.documents.find(d => d.document_type === 'MEMBERSHIP_CERTIFICATE').expiry_date = null;
+  if (change === 'expired') d.expiry_date = '2025-06-22';
+  if (change === 'unverified') d.is_verified = false;
+  if (change === 'owner') d.owner_user_id = 'another-owner';
+  if (change === 'application') d.application_case_id = 'another-application';
+  assert.ok(!engine.applicableMotivationEvidence(s).some(e => e.id === d.id), change);
+}
 for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
   for (const change of ['missing', 'unverified', 'expired', 'foreign']) {
     const s = structuredClone(sources);
@@ -268,7 +289,7 @@ for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
     assert.equal(requirements.find(r => r.key === 'GOOD_STANDING').state, 'SATISFIED');
     const s = { ...sources, documents: tables.documents };
     const eligible = engine.applicableMotivationEvidence(s).some(d => d.id === document.id);
-    assert.equal(eligible, verified && validity === 'SATISFIED');
+    assert.equal(eligible, verified && (validity === 'SATISFIED' || (type === 'DEDICATED_STATUS' && expiry === null)));
     const r = { ...review, evidenceIds: review.evidenceIds.filter(id => id !== document.id) };
     assert.equal(engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)), !eligible, 'required Section 16 certificates are automatically recognised only when eligible');
     if (eligible) {
