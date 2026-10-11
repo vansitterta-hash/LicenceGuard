@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { certificateValidity } from '../utils/documentValidity';
 import { canonicalMotivationForCase } from './motivationService';
 import { declarationReadinessIssues } from '../utils/saps271Declarations';
 import { saps517RequiredProfileIssues } from '../utils/saps517Applicant';
@@ -214,7 +215,7 @@ function selectRequirementDocument(
     })
     .sort((left, right) => {
       if (['FIREARM_LICENCE_FIRST_APPLICATION','FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.application_type) && ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS'].includes(requirement.key)) {
-        const valid = (d: DocumentRecord) => Boolean(d.expiry_date && Number.isFinite(Date.parse(d.expiry_date)) && daysUntil(d.expiry_date) >= 0);
+          const valid = (d: DocumentRecord) => certificateValidity(d.expiry_date) === 'CURRENT';
         if (valid(left) !== valid(right)) return valid(left) ? -1 : 1;
       }
       const leftExpired = Boolean(left.expiry_date && daysUntil(left.expiry_date) < 0);
@@ -258,7 +259,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
   const competencies = (competenciesResult.data ?? []) as CompetencyRow[];
   const firearms = (firearmsResult.data ?? []) as FirearmRow[];
   const licences = (licencesResult.data ?? []) as LicenceRow[];
-  const documents = (documentsResult.data ?? []) as DocumentRecord[];
+  const documents = ((documentsResult.data ?? []) as DocumentRecord[]).filter(document => document.client_id === clientId);
 
   const firearmById = new Map(firearms.map((item) => [item.id, item]));
   const licenceById = new Map(licences.map((item) => [item.id, item]));
@@ -336,6 +337,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
     const generated271State = saps271GeneratedState(current271,source271 ? saps271SourceSnapshot({data:source271,reviewValues:createReviewValues(source271)}) : '');
     const usesCanonicalMotivation = is271 && ['13', '15', '16', '17'].includes(section);
     const canonicalMotivation = usesCanonicalMotivation ? await canonicalMotivationForCase(applicationCase.id, documents) : null;
+    const validityRequirements: ReadinessRequirement[] = [];
     const requirements: ReadinessRequirement[] = definitions.map((definition) => {
       let state: RequirementState;
       let documentId: string | undefined;
@@ -385,9 +387,17 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
             : !linked && definition.documentType && GENERATED_APPLICATION_FORM_TYPES.has(definition.documentType)
               ? 'PENDING_GENERATION'
               : documentState(linked);
-        if (is271 && ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS'].includes(definition.key) && linked && (!linked.expiry_date || !Number.isFinite(Date.parse(linked.expiry_date)))) {
-          state = 'UNVERIFIED';
-          definition.detail = 'Record and verify the current certificate validity/expiry before using this time-sensitive evidence.';
+        if (is271 && ['MEMBERSHIP_CERTIFICATE','DEDICATED_STATUS'].includes(definition.key) && linked) {
+          // Verification is authoritative; current validity is an independent requirement.
+          state = linked.is_verified ? 'SATISFIED' : 'UNVERIFIED';
+          const validity = certificateValidity(linked.expiry_date);
+          validityRequirements.push({ key: `${definition.key}_VALIDITY`, label: `${definition.label} — current validity`,
+            documentType: null, required: definition.required, delivery: 'DIGITAL',
+            state: validity === 'CURRENT' ? 'SATISFIED' : validity === 'EXPIRED' ? 'EXPIRED' : 'MISSING',
+            detail: validity === 'CURRENT' ? `Certificate validity is current through ${linked.expiry_date}.`
+              : validity === 'EXPIRED' ? `Certificate expired on ${linked.expiry_date}; current evidence is required. Verification remains unchanged.`
+              : 'Certificate expiry is missing or invalid; establish current validity in the existing document record. Verification remains unchanged.',
+          });
         }
       }
       const generated271 = is271 && definition.documentType === 'FIREARM_LICENCE_APPLICATION_FORM' && (current271 || !documentId);
@@ -411,6 +421,7 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
       };
     });
 
+    requirements.push(...validityRequirements);
     if (firearm && !matchingCompetency) {
       requirements.unshift({ key: 'MATCHING_COMPETENCY', label: `Matching ${firearm.required_competency.toLowerCase()} competency`, detail: 'The firearm cannot proceed without the matching competency category.', state: 'MISSING', required: true, documentType: null, delivery: 'DIGITAL' });
     }

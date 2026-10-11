@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import { certificateValidity } from '../utils/documentValidity';
 import type { DocumentRecord } from '../types/document';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { applicationFormAnswers, saps271ComponentSerials } from '../utils/applicationFormAnswers';
@@ -38,7 +39,9 @@ function motivationSafeStatement(answers: ReturnType<typeof applicationFormAnswe
 }
 export function applicableMotivationEvidence(s: MotivationSources): DocumentRecord[] {
   const section = s.application.licence_section;
-  return s.documents.filter(d => d.lifecycle_status === 'ACTIVE' && d.is_verified && d.storage_path && EVIDENCE_TYPES.has(d.document_type)
+  return s.documents.filter(d => d.client_id === s.client.id && d.dealer_id === s.client.dealer_id
+    && d.lifecycle_status === 'ACTIVE' && d.is_verified && d.storage_path && EVIDENCE_TYPES.has(d.document_type)
+    && (!['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(d.document_type) || certificateValidity(d.expiry_date) === 'CURRENT')
     && d.metadata?.category !== 'APPLICATION_PACK'
     && (!d.expiry_date || d.expiry_date >= new Date().toISOString().slice(0, 10))
     && ((d.document_type === 'ID_COPY' && d.client_id === s.client.id && d.dealer_id === s.client.dealer_id)

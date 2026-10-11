@@ -26,7 +26,7 @@ const client = { ...privacy, id: 'client', first_name: 'Test', surname: 'Applica
 const application = { ...privacy, id: 'case', client_id: 'client', firearm_id: 'firearm', competency_id: 'competency', firearm_licence_id: null, application_type: 'FIREARM_LICENCE_ADDITIONAL_APPLICATION', licence_section: '16', primary_purpose: 'Dedicated sport shooting', sport_discipline: 'Trap', sport_association: 'Test association', motivation_summary: 'I intend to participate in my recorded trap discipline.' };
 const firearm = { ...privacy, id: 'firearm', client_id: 'client', is_active: true, make: 'CZ', model: 'Test model', calibre: '12 BR SHOTGUN', serial_number: '1165306', firearm_type: 'SHOTGUN', required_competency: 'SHOTGUN' };
 const competency = { ...privacy, id: 'competency', client_id: 'client', category: 'SHOTGUN', certificate_number: 'TEST-COMP', verified: true, expiry_date: '2099-12-31' };
-const evidence = (id, type, extra = {}) => ({ ...privacy, id, client_id: 'client', firearm_id: null, application_case_id: 'case', competency_id: null, firearm_licence_id: null, document_name: id, document_type: type, metadata: {}, file_name: id + '.pdf', mime_type: 'application/pdf', storage_path: 'dealer/client/' + id + '.pdf', lifecycle_status: 'ACTIVE', is_verified: true, version_number: 1, created_at: '2026-10-10T00:00:00Z', ...extra });
+const evidence = (id, type, extra = {}) => ({ ...privacy, id, client_id: 'client', firearm_id: null, application_case_id: 'case', competency_id: null, firearm_licence_id: null, document_name: id, document_type: type, metadata: {}, file_name: id + '.pdf', mime_type: 'application/pdf', storage_path: 'dealer/client/' + id + '.pdf', lifecycle_status: 'ACTIVE', is_verified: true, expiry_date: ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(type) ? '2099-12-31' : null, version_number: 1, created_at: '2026-10-10T00:00:00Z', ...extra });
 const documents = [evidence('id-proof', 'ID_COPY'), evidence('membership', 'MEMBERSHIP_CERTIFICATE'), evidence('dedicated', 'DEDICATED_STATUS'), evidence('unverified', 'SUPPORTING_DOCUMENT', { is_verified: false }), evidence('official-form', 'FIREARM_LICENCE_APPLICATION_FORM'), evidence('foreign', 'SUPPORTING_DOCUMENT', { firearm_id: 'different-firearm' }), evidence('research', 'SUPPORTING_RESEARCH', { firearm_id: 'firearm', is_verified: false, metadata: { researchSources: [{ id: 'source', title: 'Test manufacturer specification', publisher: 'Test manufacturer', url: 'https://example.test/cz', summary: 'A source-supported test characteristic.' }] } })];
 const sources = { client, application, firearm, competency, documents };
 const review = engine.defaultMotivationReview(sources);
@@ -225,6 +225,39 @@ const service = load('src/services/motivationService.ts');
 const readinessService = loader({ '../lib/supabase': { supabase: db }, './motivationService': service })('src/services/applicationReadinessService.ts');
 const motivationRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.documentType === 'MOTIVATION');
 const competencyRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.key === 'COMPETENCY_CERTIFICATE');
+tables.documents.push(evidence('good-standing', 'GOOD_STANDING', { firearm_id: 'firearm' }));
+for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
+  const document = tables.documents.find(d => d.document_type === type);
+  const original = structuredClone(document);
+  for (const [verified, expiry, verification, validity] of [
+    [true, null, 'SATISFIED', 'MISSING'], [true, 'invalid', 'SATISFIED', 'MISSING'],
+    [true, '2026-02-30', 'SATISFIED', 'MISSING'], [true, '2099-12-31', 'SATISFIED', 'SATISFIED'],
+    [true, '2025-06-22', 'SATISFIED', 'EXPIRED'], [false, '2099-12-31', 'UNVERIFIED', 'SATISFIED'],
+  ]) {
+    Object.assign(document, { is_verified: verified, expiry_date: expiry });
+    const before = JSON.stringify(document);
+    const requirements = (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements;
+    assert.equal(requirements.find(r => r.key === type).state, verification);
+    assert.equal(requirements.find(r => r.key === `${type}_VALIDITY`).state, validity);
+    assert.equal(requirements.find(r => r.key === 'GOOD_STANDING').state, 'SATISFIED');
+    const s = { ...sources, documents: tables.documents };
+    const eligible = engine.applicableMotivationEvidence(s).some(d => d.id === document.id);
+    assert.equal(eligible, verified && validity === 'SATISFIED');
+    const r = { ...review, evidenceIds: review.evidenceIds.filter(id => id !== document.id) };
+    assert.ok(engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)), 'presence never silently selects evidence');
+    if (eligible) {
+      r.evidenceIds.push(document.id);
+      assert.ok(!engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)));
+    } else assert.throws(() => engine.motivationAnnexures(s, review), /applicable verified/);
+    assert.equal(JSON.stringify(document), before, 'verification/expiry records are never mutated');
+  }
+  Object.assign(document, original);
+  document.client_id = 'another-client';
+  assert.ok(!engine.applicableMotivationEvidence({ ...sources, documents: tables.documents }).some(d => d.id === document.id));
+  assert.equal((await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.key === type).state, 'MISSING');
+  Object.assign(document, original);
+}
+tables.documents = tables.documents.filter(d => d.id !== 'good-standing');
 const originalCompetency = structuredClone(tables.competencies[0]);
 tables.competencies[0].issue_date = '2020-06-22';
 assert.equal((await competencyRequirement()).state, 'SATISFIED', 'current verified competency remains complete');
