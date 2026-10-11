@@ -21,7 +21,7 @@ const privacy = { dealer_id: 'dealer', owner_user_id: 'owner', record_scope: 'PR
 const client = { ...privacy, id: 'client', first_name: 'Test', surname: 'Applicant', id_number: '0000000000000', address_line_1: 'Test street', city: 'Test town', saps271_declarations: {
   answers: { convictions: { answer: 'NO' }, unfitness: { answer: 'NO' } }, confirmedAt: '2026-10-10',
   saps517: { citizenshipChoice: 'SA_CITIZEN', accreditedTrainingCertificate: { answer: 'YES', institution: 'Test training provider' } },
-  applications: { case: { prescribedSafe: 'YES', safeMounted: 'YES', safeMountings: ['WALL', 'FLOOR'], saps271Firearm: { firearmId: 'firearm', receiverSerial: '1165306', action: 'MANUAL' } } },
+  applications: { case: { prescribedSafe: 'YES', safeType: 'RIFLE', safeDetails: '2m Upright 16 Rifle Safe', safeMounted: 'YES', safeMountings: ['WALL', 'FLOOR'], saps271Firearm: { firearmId: 'firearm', receiverSerial: '1165306', action: 'MANUAL' } } },
 } };
 const application = { ...privacy, id: 'case', client_id: 'client', firearm_id: 'firearm', competency_id: 'competency', firearm_licence_id: null, application_type: 'FIREARM_LICENCE_ADDITIONAL_APPLICATION', licence_section: '16', primary_purpose: 'Dedicated sport shooting', sport_discipline: 'Trap', sport_association: 'Test association', motivation_summary: 'I intend to participate in my recorded trap discipline.' };
 const firearm = { ...privacy, id: 'firearm', client_id: 'client', is_active: true, make: 'CZ', model: 'Test model', calibre: '12 BR SHOTGUN', serial_number: '1165306', firearm_type: 'SHOTGUN', required_competency: 'SHOTGUN' };
@@ -42,6 +42,33 @@ assert.ok(engine.motivationAnnexures(reusableIdSources, review).some(a => a.docu
 assert.ok(!engine.motivationAnnexures(reusableIdSources, { ...review, evidenceIds: review.evidenceIds.filter(id => id !== 'id-proof') }).some(a => a.document.id === 'id-proof'), 'a saved draft never gains ID without selection');
 const xmlOf = async bytes => (await JSZip.loadAsync(bytes)).file('word/document.xml').async('string');
 const textOf = async bytes => new DOMParser().parseFromString(await xmlOf(bytes), 'application/xml').documentElement.textContent;
+for (const [mounts, wording, absent] of [
+  [['FLOOR'], 'the floor only', /\bwall\b/i],
+  [['WALL'], 'the wall only', /\bfloor\b/i],
+  [['FLOOR', 'WALL'], 'both the floor and wall', /Rawl|SABS/],
+]) {
+  const s = structuredClone(sources);
+  s.client.saps271_declarations.applications.case.safeMountings = mounts;
+  assert.deepEqual(engine.motivationReleaseIssues(s, review), []);
+  const xml = await xmlOf(await engine.populateCanonicalMotivation(master, s, review, '2026-10-10'));
+  const statement = Array.from(new DOMParser().parseFromString(xml, 'application/xml').getElementsByTagName('w:p')).find(p => p.textContent.startsWith('I possess the prescribed'))?.textContent;
+  assert.ok(statement?.includes(wording));
+  assert.match(statement, /rifle safe.*2m Upright 16 Rifle Safe/);
+  assert.doesNotMatch(statement, absent);
+  const unconfirmed = { ...review, assertions: { ...review.assertions, safe: false } };
+  assert.ok(engine.motivationReleaseIssues(s, unconfirmed).some(issue => issue.includes('Applicant confirmation required')));
+  assert.match(await textOf(await engine.populateCanonicalMotivation(master, s, unconfirmed, '2026-10-10')), /APPLICANT CONFIRMATION REQUIRED: The prescribed safe/);
+}
+for (const invalid of [
+  { safeMountings: [] }, { safeMountings: undefined }, { safeMountings: ['CEILING'] },
+  { safeMounted: 'NO' }, { prescribedSafe: 'NO' }, { prescribedSafe: undefined },
+  { safeDetails: '' }, { safeDetails: '[CONFIRM]' }, { safeType: undefined },
+]) {
+  const s = structuredClone(sources);
+  Object.assign(s.client.saps271_declarations.applications.case, invalid);
+  assert.ok(engine.motivationReleaseIssues(s, review).some(issue => issue.startsWith('Saved safe details')), 'confirmation cannot override invalid saved safe data');
+  assert.match(await textOf(await engine.populateCanonicalMotivation(master, s, review, '2026-10-10')), /APPLICANT CONFIRMATION REQUIRED: The prescribed safe/);
+}
 const generated = await engine.populateCanonicalMotivation(master, sources, review, '2026-10-10');
 const text = await textOf(generated);
 for (const term of ['Test Applicant', 'CZ', '12 BR SHOTGUN', 'RECEIVER serial: 1165306', 'Section 16', 'Dedicated sport shooting', 'Applicant-supplied test background.', 'Annexure A', 'Annexure B', 'Annexure C']) assert.ok(text.includes(term), term);

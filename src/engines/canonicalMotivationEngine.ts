@@ -12,7 +12,7 @@ export function hasMotivationPlaceholder(text: string): boolean {
 export const MASTER_ASSERTIONS: Record<string, { paragraph: number; label: string }> = {
   citizenship: { paragraph: 202, label: 'I am a South African citizen and the stated residential address is correct.' },
   training: { paragraph: 218, label: 'The prescribed training/testing statement and provider are accurate.' },
-  safe: { paragraph: 234, label: 'I possess the prescribed SABS safe, bolted with Rawl bolts to the floor and wall as stated in the Master.' },
+  safe: { paragraph: 234, label: 'The prescribed safe description, type and mounting recorded in my saved application answers are accurate.' },
   criminal: { paragraph: 241, label: 'The Master’s no-criminal-record and no-disqualifying-offence statement is accurate.' },
   general: { paragraph: 401, label: 'I am not inclined to violence, am an SA citizen over 21, have never been convicted, and am not addicted to drugs or alcohol.' },
   wellbeing: { paragraph: 403, label: 'The Master’s mental stability, no violent/suicide tendencies, and never-harmed-self-or-others statement is accurate.' },
@@ -24,6 +24,17 @@ function motivationApplicationAnswers(s: MotivationSources) {
   const answers = applicationFormAnswers(s.client.saps271_declarations, s.application.id);
   // A changed firearm link must not reuse the previous firearm's action/serial answers.
   return answers.saps271Firearm && answers.saps271Firearm.firearmId !== s.firearm.id ? { ...answers, saps271Firearm: undefined } : answers;
+}
+function motivationSafeStatement(answers: ReturnType<typeof applicationFormAnswers>): string | null {
+  const types: Record<string, string> = { HANDGUN: 'handgun safe', RIFLE: 'rifle safe', STRONGROOM: 'strongroom', DEVICE: 'device' };
+  const details = answers.safeDetails?.trim();
+  const mounts = answers.safeMountings;
+  if (answers.prescribedSafe !== 'YES' || answers.safeMounted !== 'YES'
+    || !types[answers.safeType ?? ''] || !details || details.length > 40 || hasMotivationPlaceholder(details)
+    || !Array.isArray(mounts) || !mounts.length || mounts.some(mount => mount !== 'FLOOR' && mount !== 'WALL')) return null;
+  const mounting = mounts.includes('FLOOR') && mounts.includes('WALL') ? 'both the floor and wall'
+    : mounts.includes('FLOOR') ? 'the floor only' : 'the wall only';
+  return `I possess the prescribed ${types[answers.safeType!]}, described as ${details}, mounted to ${mounting}.`;
 }
 export function applicableMotivationEvidence(s: MotivationSources): DocumentRecord[] {
   const section = s.application.licence_section;
@@ -117,7 +128,7 @@ export function motivationReleaseIssues(s: MotivationSources, r: MotivationRevie
   if (profile?.saps517?.citizenshipChoice !== 'SA_CITIZEN') issues.push('Confirm SA citizenship in the existing profile.');
   const training = profile?.saps517?.accreditedTrainingCertificate;
   if (training?.answer !== 'YES' || !training.institution?.trim()) issues.push('Confirm the accredited training provider in the existing profile.');
-  if (answers.prescribedSafe !== 'YES' || answers.safeMounted !== 'YES' || !answers.safeMountings?.includes('FLOOR') || !answers.safeMountings.includes('WALL')) issues.push('Saved safe details are unknown or conflict with the Master assertion.');
+  if (!motivationSafeStatement(answers)) issues.push('Saved safe details are unknown, incomplete or contradictory.');
   if (!s.competency?.verified || !s.competency.certificate_number || (s.competency.expiry_date && s.competency.expiry_date < new Date().toISOString().slice(0, 10))) issues.push('A verified current competency is required.');
   if (!s.client.address_line_1 || !s.client.city) issues.push('Complete the stored residential address.');
   const serials = saps271ComponentSerials(answers.saps271Firearm, s.firearm.serial_number);
@@ -187,8 +198,9 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
   const values: Record<number, string> = { 4: `Name: ${name}`, 5: `Identity Number: ${s.client.id_number}`, 45: `Telephone: ${s.client.alternate_cellphone ?? ''}    Street address: ${s.client.address_line_1 ?? ''}`, 46: `Fax: ${s.client.saps271_declarations?.saps517?.faxNumber ?? ''}    Suburb: ${s.client.suburb ?? ''}`, 47: `Cell: ${s.client.cellphone ?? ''}    Town: ${s.client.city ?? ''}`, 48: `Enquiries: ${s.client.email ?? ''}    Code: ${s.client.postal_code ?? ''}`, 51: `Date: ${date}`, 57: `Name: ${name}    Identity number: ${s.client.id_number}`, 64: `Firearm type: ${f.firearm_type.replaceAll('_', ' ')}`, 65: `Make: ${f.make}${f.model?.trim() ? `; Model: ${f.model}` : ''}; Calibre: ${f.calibre}`, 66: serialText, 86: `Name: ${name}`, 185: `Name: ${name}    Identity number: ${s.client.id_number}`, 187: firearmText, 189: `${f.calibre}; ${serialText}`, 196: `Name: ${name}`, 198: `Identity number: ${s.client.id_number}`, 202: review.assertions.citizenship && s.client.saps271_declarations?.saps517?.citizenshipChoice === 'SA_CITIZEN' ? `I am a South African citizen and reside at ${address}.` : `[CITIZENSHIP REQUIRES CONFIRMATION] Residential address: ${address}`, 204: refs('ID_COPY') ? `Verified identity supporting document: ${refs('ID_COPY')}.` : 'No verified identity document selected as an annexure.', 211: `Section ${section ?? '[CONFIRM]'} Licence to possess a firearm for: ${purpose}`, 218: review.assertions.training && s.client.saps271_declarations?.saps517?.accreditedTrainingCertificate?.answer === 'YES' ? (p[218].textContent ?? '').replace('_______________________________________________________', s.client.saps271_declarations.saps517.accreditedTrainingCertificate.institution || '[PROVIDER REQUIRES CONFIRMATION]') : '[PRESCRIBED TRAINING AND PROVIDER REQUIRE CONFIRMATION]', 230: `I hereby apply in terms of Section ${section ?? '[CONFIRM]'} for: ${purpose}.${s.application.sport_discipline ? ` Discipline: ${s.application.sport_discipline}.` : ''}${s.application.sport_association ? ` Association: ${s.application.sport_association}.` : ''}\nCompetency: ${s.competency?.verified ? `${s.competency.category}, certificate ${s.competency.certificate_number ?? '[NOT RECORDED]'}` : '[VERIFIED COMPETENCY REQUIRED]'}.${refs('COMPETENCY_CERTIFICATE') ? ` ${refs('COMPETENCY_CERTIFICATE')}.` : ''}`, 238: review.background || '[APPLICANT BACKGROUND REQUIRES CONFIRMATION]', 247: firearmText, 248: `Calibre: ${f.calibre}`, 249: serialText, 259: `${f.firearm_type.replaceAll('_', ' ')} for ${purpose}.\n${s.application.sport_discipline ? `Discipline: ${s.application.sport_discipline}.\n` : ''}${s.application.sport_association ? `Association: ${s.application.sport_association}.\n` : ''}${review.narrative || '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]'}${claimText('Firearm relevance') ? `\n${claimText('Firearm relevance')}` : ''}`, 261: firearmText, 262: `Calibre: ${f.calibre}`, 263: serialText, 381: 'Applicant review control: review the populated facts, declarations, evidence and sources before confirming and releasing this version.', 384: annexures.length ? annexures.map(a => `Annexure ${a.letter}: ${a.document.document_name}`).join('\n') : 'No verified supporting documents selected; no annexures represented as attached.', 425: `Date: ${date}`, 429: `Place: ${s.client.city ?? '[CONFIRM]'}` };
   for (const [key, assertion] of Object.entries(MASTER_ASSERTIONS)) if (key !== 'citizenship' && key !== 'training') {
     const conflict = key === 'criminal' && (s.client.saps271_declarations?.answers?.convictions?.answer !== 'NO' || s.client.saps271_declarations?.answers?.unfitness?.answer !== 'NO')
-      || key === 'safe' && (answers.prescribedSafe !== 'YES' || answers.safeMounted !== 'YES' || !answers.safeMountings?.includes('FLOOR') || !answers.safeMountings?.includes('WALL'));
+      || key === 'safe' && !motivationSafeStatement(answers);
     if (review.assertions[key] !== true || conflict) values[assertion.paragraph] = `[APPLICANT CONFIRMATION REQUIRED: ${assertion.label}]`;
+    else if (key === 'safe') values[assertion.paragraph] = motivationSafeStatement(answers)!;
   }
   values[59] = (p[59].textContent ?? '').replace('LICENSES', 'LICENCES');
   values[183] = (p[183].textContent ?? '').replace('LICENSES', 'LICENCES');
