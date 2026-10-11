@@ -6,6 +6,9 @@ import { CANONICAL_MOTIVATION_HASH, MOTIVATION_MAPPING_VERSION, stableMotivation
 import { COLLECTOR_CLAIM_SECTIONS, type MotivationSources, type MotivationReview, type MotivationResearchSource, type MotivationAnnexure } from '../types/motivation';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+export function hasMotivationPlaceholder(text: string): boolean {
+  return /\[(?:[^\]]*(?:REQUIR|CONFIRM|NOT RECORDED|PLACEHOLDER)[^\]]*)\]|_{3,}|\b(?:TODO|TBD|insert here|lorem ipsum)\b/i.test(text);
+}
 export const MASTER_ASSERTIONS: Record<string, { paragraph: number; label: string }> = {
   citizenship: { paragraph: 202, label: 'I am a South African citizen and the stated residential address is correct.' },
   training: { paragraph: 218, label: 'The prescribed training/testing statement and provider are accurate.' },
@@ -83,7 +86,8 @@ export function motivationReleaseIssues(s: MotivationSources, r: MotivationRevie
   if (['15', '16'].includes(s.application.licence_section ?? '') && /sport\s+shooting/i.test(s.application.primary_purpose ?? '') && !s.application.sport_discipline?.trim()) issues.push('Save the actual sport-shooting discipline.');
   if (s.application.licence_section === '17' && !/collect/i.test(s.application.primary_purpose ?? '')) issues.push('Confirm that the Section 17 purpose is private collection.');
   if (!r.background.trim()) issues.push('Confirm applicant background.');
-  if (!r.narrative.trim()) issues.push('Confirm the application-specific personal motivation.');
+  if (r.narrative.trim().split(/\s+/).length < 20 || hasMotivationPlaceholder(r.narrative)) issues.push('Provide a substantive personal motivation: actual participation/use, intended firearm use, suitability and relevant personal circumstances (at least 20 words; no placeholders).');
+  if (hasMotivationPlaceholder(stableMotivationJson(r))) issues.push('Replace unresolved placeholder text in the Motivation review before release.');
   for (const [key, a] of Object.entries(MASTER_ASSERTIONS)) if (r.assertions[key] !== true) issues.push(`Applicant confirmation required: ${a.label}`);
   const profile = s.client.saps271_declarations;
   const answers = motivationApplicationAnswers(s);
@@ -96,6 +100,8 @@ export function motivationReleaseIssues(s: MotivationSources, r: MotivationRevie
   if (!s.client.address_line_1 || !s.client.city) issues.push('Complete the stored residential address.');
   const serials = saps271ComponentSerials(answers.saps271Firearm, s.firearm.serial_number);
   if (!serials.component) issues.push('Confirm the stored serial component in the existing application answers.');
+  if (s.application.licence_section === '17' && !answers.saps271Firearm?.action) issues.push('Confirm the firearm action before releasing a collector Motivation.');
+  if (hasMotivationPlaceholder(stableMotivationJson({ client: { name: s.client.first_name, surname: s.client.surname, address: [s.client.address_line_1, s.client.address_line_2, s.client.suburb, s.client.city, s.client.province, s.client.postal_code] }, firearm: s.firearm, purpose: s.application.primary_purpose, discipline: s.application.sport_discipline, association: s.application.sport_association, competency: s.competency, training }))) issues.push('Correct placeholder text in the stored Motivation source fields.');
   const annexures = motivationAnnexures(s, r);
   if (s.application.licence_section === '16' && (!annexures.some(a => a.document.document_type === 'DEDICATED_STATUS') || !annexures.some(a => a.document.document_type === 'MEMBERSHIP_CERTIFICATE'))) issues.push('Select verified dedicated-status and membership evidence.');
   if (s.application.licence_section === '17') {
@@ -146,28 +152,50 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
   const annexures = motivationAnnexures(s, review);
   const claims = reviewedMotivationClaims(s, review);
   const name = `${s.client.first_name} ${s.client.surname}`;
-  const address = [s.client.address_line_1, s.client.address_line_2, s.client.suburb, s.client.city, s.client.province, s.client.postal_code].filter(Boolean).join(', ');
+  const address = [...new Map([s.client.address_line_1, s.client.address_line_2, s.client.suburb, s.client.city, s.client.province, s.client.postal_code].filter((v): v is string => Boolean(v?.trim())).map(v => [v.trim().toLowerCase(), v.trim()])).values()].join(', ');
   const f = s.firearm, section = s.application.licence_section, purpose = s.application.primary_purpose || '[PURPOSE REQUIRES CONFIRMATION]';
   const answers = motivationApplicationAnswers(s);
   const serials = saps271ComponentSerials(answers.saps271Firearm, f.serial_number);
   const serialText = `${serials.component ?? '[COMPONENT REQUIRES CONFIRMATION]'} serial: ${f.serial_number}`;
-  const firearmText = `Type: ${f.firearm_type.replaceAll('_', ' ')}; Make: ${f.make}; Model: ${f.model ?? '[MODEL NOT RECORDED]'}`;
+  const firearmText = `Type: ${f.firearm_type.replaceAll('_', ' ')}; Make: ${f.make}${f.model?.trim() ? `; Model: ${f.model}` : ''}`;
   const refs = (type: string) => annexures.filter(a => a.document.document_type === type).map(a => `Annexure ${a.letter}`).join(', ');
   const claimText = (sectionName: string) => claims.filter(c => c.section === sectionName).map(c => `${c.text} [${c.source.title}; ${c.source.publisher ?? 'publisher not recorded'}; ${c.source.publishedDate ?? 'date not recorded'}; ${c.source.url}]`).join('\n');
-  const values: Record<number, string> = { 4: `Name: ${name}`, 5: `Identity Number: ${s.client.id_number}`, 45: `Telephone: ${s.client.alternate_cellphone ?? ''}    Street address: ${s.client.address_line_1 ?? ''}`, 46: `Fax: ${s.client.saps271_declarations?.saps517?.faxNumber ?? ''}    Suburb: ${s.client.suburb ?? ''}`, 47: `Cell: ${s.client.cellphone ?? ''}    Town: ${s.client.city ?? ''}`, 48: `Enquiries: ${s.client.email ?? ''}    Code: ${s.client.postal_code ?? ''}`, 51: `Date: ${date}`, 57: `Name: ${name}    Identity number: ${s.client.id_number}`, 64: `Firearm type: ${f.firearm_type.replaceAll('_', ' ')}`, 65: `Make: ${f.make}; Model: ${f.model ?? '[NOT RECORDED]'}; Calibre: ${f.calibre}`, 66: serialText, 86: `Name: ${name}`, 185: `Name: ${name}    Identity number: ${s.client.id_number}`, 187: firearmText, 189: `${f.calibre}; ${serialText}`, 196: `Name: ${name}`, 198: `Identity number: ${s.client.id_number}`, 202: review.assertions.citizenship && s.client.saps271_declarations?.saps517?.citizenshipChoice === 'SA_CITIZEN' ? `I am a South African citizen and reside at ${address}.` : `[CITIZENSHIP REQUIRES CONFIRMATION] Residential address: ${address}`, 204: refs('ID_COPY') ? `Verified identity supporting document: ${refs('ID_COPY')}.` : 'No verified identity document selected as an annexure.', 211: `Section ${section ?? '[CONFIRM]'} Licence to possess a firearm for: ${purpose}`, 218: review.assertions.training && s.client.saps271_declarations?.saps517?.accreditedTrainingCertificate?.answer === 'YES' ? (p[218].textContent ?? '').replace('_______________________________________________________', s.client.saps271_declarations.saps517.accreditedTrainingCertificate.institution || '[PROVIDER REQUIRES CONFIRMATION]') : '[PRESCRIBED TRAINING AND PROVIDER REQUIRE CONFIRMATION]', 230: `I hereby apply in terms of Section ${section ?? '[CONFIRM]'} for: ${purpose}.${s.application.sport_discipline ? ` Discipline: ${s.application.sport_discipline}.` : ''}${s.application.sport_association ? ` Association: ${s.application.sport_association}.` : ''}\nCompetency: ${s.competency?.verified ? `${s.competency.category}, certificate ${s.competency.certificate_number ?? '[NOT RECORDED]'}` : '[VERIFIED COMPETENCY REQUIRED]'}.${refs('COMPETENCY_CERTIFICATE') ? ` ${refs('COMPETENCY_CERTIFICATE')}.` : ''}`, 238: review.background || '[APPLICANT BACKGROUND REQUIRES CONFIRMATION]', 247: firearmText, 248: `Calibre: ${f.calibre}`, 249: serialText, 259: `${f.firearm_type.replaceAll('_', ' ')} for ${purpose}.\n${review.narrative || '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]'}${claimText('Firearm relevance') ? `\n${claimText('Firearm relevance')}` : ''}`, 261: firearmText, 262: `Calibre: ${f.calibre}`, 263: serialText, 381: 'Applicant review control: review the populated facts, declarations, evidence and sources before confirming and releasing this version.', 384: annexures.length ? annexures.map(a => `Annexure ${a.letter}: ${a.document.document_name}`).join('\n') : 'No verified supporting documents selected; no annexures represented as attached.', 425: `Date: ${date}`, 429: `Place: ${s.client.city ?? '[CONFIRM]'}` };
+  const values: Record<number, string> = { 4: `Name: ${name}`, 5: `Identity Number: ${s.client.id_number}`, 45: `Telephone: ${s.client.alternate_cellphone ?? ''}    Street address: ${s.client.address_line_1 ?? ''}`, 46: `Fax: ${s.client.saps271_declarations?.saps517?.faxNumber ?? ''}    Suburb: ${s.client.suburb ?? ''}`, 47: `Cell: ${s.client.cellphone ?? ''}    Town: ${s.client.city ?? ''}`, 48: `Enquiries: ${s.client.email ?? ''}    Code: ${s.client.postal_code ?? ''}`, 51: `Date: ${date}`, 57: `Name: ${name}    Identity number: ${s.client.id_number}`, 64: `Firearm type: ${f.firearm_type.replaceAll('_', ' ')}`, 65: `Make: ${f.make}${f.model?.trim() ? `; Model: ${f.model}` : ''}; Calibre: ${f.calibre}`, 66: serialText, 86: `Name: ${name}`, 185: `Name: ${name}    Identity number: ${s.client.id_number}`, 187: firearmText, 189: `${f.calibre}; ${serialText}`, 196: `Name: ${name}`, 198: `Identity number: ${s.client.id_number}`, 202: review.assertions.citizenship && s.client.saps271_declarations?.saps517?.citizenshipChoice === 'SA_CITIZEN' ? `I am a South African citizen and reside at ${address}.` : `[CITIZENSHIP REQUIRES CONFIRMATION] Residential address: ${address}`, 204: refs('ID_COPY') ? `Verified identity supporting document: ${refs('ID_COPY')}.` : 'No verified identity document selected as an annexure.', 211: `Section ${section ?? '[CONFIRM]'} Licence to possess a firearm for: ${purpose}`, 218: review.assertions.training && s.client.saps271_declarations?.saps517?.accreditedTrainingCertificate?.answer === 'YES' ? (p[218].textContent ?? '').replace('_______________________________________________________', s.client.saps271_declarations.saps517.accreditedTrainingCertificate.institution || '[PROVIDER REQUIRES CONFIRMATION]') : '[PRESCRIBED TRAINING AND PROVIDER REQUIRE CONFIRMATION]', 230: `I hereby apply in terms of Section ${section ?? '[CONFIRM]'} for: ${purpose}.${s.application.sport_discipline ? ` Discipline: ${s.application.sport_discipline}.` : ''}${s.application.sport_association ? ` Association: ${s.application.sport_association}.` : ''}\nCompetency: ${s.competency?.verified ? `${s.competency.category}, certificate ${s.competency.certificate_number ?? '[NOT RECORDED]'}` : '[VERIFIED COMPETENCY REQUIRED]'}.${refs('COMPETENCY_CERTIFICATE') ? ` ${refs('COMPETENCY_CERTIFICATE')}.` : ''}`, 238: review.background || '[APPLICANT BACKGROUND REQUIRES CONFIRMATION]', 247: firearmText, 248: `Calibre: ${f.calibre}`, 249: serialText, 259: `${f.firearm_type.replaceAll('_', ' ')} for ${purpose}.\n${s.application.sport_discipline ? `Discipline: ${s.application.sport_discipline}.\n` : ''}${s.application.sport_association ? `Association: ${s.application.sport_association}.\n` : ''}${review.narrative || '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]'}${claimText('Firearm relevance') ? `\n${claimText('Firearm relevance')}` : ''}`, 261: firearmText, 262: `Calibre: ${f.calibre}`, 263: serialText, 381: 'Applicant review control: review the populated facts, declarations, evidence and sources before confirming and releasing this version.', 384: annexures.length ? annexures.map(a => `Annexure ${a.letter}: ${a.document.document_name}`).join('\n') : 'No verified supporting documents selected; no annexures represented as attached.', 425: `Date: ${date}`, 429: `Place: ${s.client.city ?? '[CONFIRM]'}` };
   for (const [key, assertion] of Object.entries(MASTER_ASSERTIONS)) if (key !== 'citizenship' && key !== 'training') {
     const conflict = key === 'criminal' && (s.client.saps271_declarations?.answers?.convictions?.answer !== 'NO' || s.client.saps271_declarations?.answers?.unfitness?.answer !== 'NO')
       || key === 'safe' && (answers.prescribedSafe !== 'YES' || answers.safeMounted !== 'YES' || !answers.safeMountings?.includes('FLOOR') || !answers.safeMountings?.includes('WALL'));
     if (review.assertions[key] !== true || conflict) values[assertion.paragraph] = `[APPLICANT CONFIRMATION REQUIRED: ${assertion.label}]`;
   }
-  // Shared source and annexure lists are generated from the same allocation.
-  values[375] = annexures.length ? `Verified supporting evidence included with this Motivation: ${annexures.map(a => `Annexure ${a.letter} — ${a.document.document_name}`).join('; ')}. Official SAPS forms remain separate.` : 'No annexures selected. Official SAPS forms remain separate.';
-  values[389] = `NEW FIREARM LICENCE (SAPS 271): completed official SAPS 271; certified identity documentation; original competency certificate; two recent colour passport photographs; detailed motivation with supporting evidence; executor appointment letter if inherited; applicable Section ${section ?? '[CONFIRM]'} supporting documents. Verify current DFO instructions before submission.`;
-  values[391] = 'COMPETENCY (SAPS 517 / 517(a)): SAPS explicitly lists certified proof of residence among supporting documents. Keep this requirement in the relevant competency submission checklists, not in the default new-firearm-licence motivation annexures.';
+  values[59] = (p[59].textContent ?? '').replace('LICENSES', 'LICENCES');
+  values[183] = (p[183].textContent ?? '').replace('LICENSES', 'LICENCES');
+  values[218] = values[218].replace('and has successfully', 'and have successfully');
   for (const [i, text] of Object.entries(values)) set(Number(i), text);
-  // Preserve the index structure but never publish invented pagination.
-  for (let i = 101; i <= 155; i += 3) set(i, '');
-  set(98, 'Page number (review after pagination)');
+  // The Motivation renderer resolves index cells against actual section bookmarks.
+  const sections = [[99, 194], [102, 207], [105, 214], [108, 236], [111, 239], [114, 243], [117, 257], ...(section === '17' ? [[120, 266], [123, 268], [126, 280], [129, 286], [132, 308], [135, 315], [138, 335], [141, 356], [144, 359]] : []), [150, 383], [147, 397]];
+  // The Master places the register before the conclusion in the body; reflect
+  // that actual order in the index without rearranging applicant content.
+  const conclusionRow = p[147].parentNode?.parentNode;
+  const registerRow = p[150].parentNode?.parentNode;
+  if (conclusionRow && registerRow && conclusionRow.parentNode === registerRow.parentNode) registerRow.parentNode?.insertBefore(registerRow, conclusionRow);
+  for (const [row, heading] of sections) {
+    const key = `lg_motivation_${heading}`;
+    const bookmark = doc.createElementNS(W, 'w:bookmarkStart');
+    bookmark.setAttribute('w:id', String(1000 + heading)); bookmark.setAttribute('w:name', key);
+    p[heading].appendChild(bookmark); set(row + 2, key);
+  }
+  let sectionNumber = 0;
+  for (const [row] of sections) {
+    if (![123, 126, 129, 132, 135, 138, 141, 144].includes(row)) sectionNumber++;
+    set(row, row >= 123 && row <= 144 ? `${sectionNumber}.${(row - 120) / 3}` : String(sectionNumber));
+  }
+  const removeIndexRow = (index: number) => {
+    let node: Node | null = p[index];
+    while (node && !(node.nodeType === 1 && (node as Element).localName === 'tr')) node = node.parentNode;
+    node?.parentNode?.removeChild(node);
+  };
+  removeIndexRow(153);
+  // Internal controls stay in the UI. Only the real annexure register is printed.
+  for (let i = 374; i <= 392; i++) if (![383, 384].includes(i)) remove(i);
   if (section !== '17') {
     const rows = new Set<Node>();
     for (let i = 120; i <= 146; i++) { let node: Node | null = p[i]; while (node && !(node.nodeType === 1 && (node as Element).localName === 'tr')) node = node.parentNode; if (node) rows.add(node); }
@@ -195,7 +223,7 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
     set(357, claims.length ? claims.map(c => `${c.source.title}; ${c.source.publisher ?? 'publisher not recorded'}; ${c.source.publishedDate ?? 'date not recorded'}; ${c.source.url}`).join('\n') : 'No reviewed external factual claims included.');
     [377, 385].forEach(remove);
   }
-  if (section !== '16') [377, 385].forEach(remove);
+  if (section === '17') for (let i = 366; i <= 373; i++) remove(i);
   zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

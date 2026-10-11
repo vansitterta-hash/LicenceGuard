@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { inflateSync } from 'node:zlib';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
 import { PDFDocument } from 'pdf-lib';
@@ -28,6 +29,7 @@ const evidence = (id, type, extra = {}) => ({ ...privacy, id, client_id: 'client
 const documents = [evidence('id-proof', 'ID_COPY'), evidence('membership', 'MEMBERSHIP_CERTIFICATE'), evidence('dedicated', 'DEDICATED_STATUS'), evidence('unverified', 'SUPPORTING_DOCUMENT', { is_verified: false }), evidence('official-form', 'FIREARM_LICENCE_APPLICATION_FORM'), evidence('foreign', 'SUPPORTING_DOCUMENT', { firearm_id: 'different-firearm' }), evidence('research', 'SUPPORTING_RESEARCH', { firearm_id: 'firearm', is_verified: false, metadata: { researchSources: [{ id: 'source', title: 'Test manufacturer specification', publisher: 'Test manufacturer', url: 'https://example.test/cz', summary: 'A source-supported test characteristic.' }] } })];
 const sources = { client, application, firearm, competency, documents };
 const review = engine.defaultMotivationReview(sources);
+review.narrative = 'I participate in trap shooting at my local range and intend to use this shotgun for that discipline. Its suitability for my planned sporting use is explained here using applicant-supplied test facts only.';
 review.background = 'Applicant-supplied test background.';
 review.assertions = Object.fromEntries(Object.keys(engine.MASTER_ASSERTIONS).map(key => [key, true]));
 assert.deepEqual(engine.motivationReleaseIssues(sources, review), []);
@@ -41,11 +43,44 @@ assert.doesNotMatch(text, /8x68S|Mauser|34853|COLLECTOR|Section 17|collecting th
 assert.doesNotMatch(text, /source-supported test characteristic/);
 assert.match(text, /Annexure A: dedicated/); assert.match(text, /Annexure B: id-proof/); assert.match(text, /Annexure C: membership/);
 assert.match(text, /Verified identity supporting document: Annexure B/);
+assert.doesNotMatch(text, /\[(?:MODEL NOT RECORDED|VERIFIED COMPETENCY REQUIRED|APPLICANT CONFIRMATION REQUIRED|PERSONAL MOTIVATION REQUIRES CONFIRMATION)/);
 const originalZip = await JSZip.loadAsync(master), outputZip = await JSZip.loadAsync(generated);
 for (const [name, entry] of Object.entries(originalZip.files)) if (!entry.dir && name !== 'word/document.xml') assert.deepEqual(await outputZip.file(name).async('uint8array'), await entry.async('uint8array'), name + ' preserved');
 const indexDoc = new DOMParser().parseFromString(await xmlOf(generated), 'application/xml');
 const indexRows = Array.from(indexDoc.getElementsByTagName('w:tbl')[0].getElementsByTagName('w:tr')).slice(1);
-for (const row of indexRows) assert.equal(row.getElementsByTagName('w:tc')[2].textContent, '', 'No invented index page numbers');
+for (const row of indexRows) assert.match(row.getElementsByTagName('w:tc')[2].textContent, /^lg_motivation_\d+$/, 'Index resolves a real section bookmark');
+assert.deepEqual(indexRows.map(row => row.getElementsByTagName('w:tc')[0].textContent), ['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+assert.doesNotMatch(text, /ANNEXURE CONTROL|REVIEW INSTRUCTIONS|Applicant review control|SAPS SUBMISSION CHECKLIST|SAPS does not prescribe|implementation guidance|Page number \(review/);
+assert.doesNotMatch(text, /LICENSES|and has successfully/);
+assert.match(text, /LICENCES/); assert.match(text, /and have successfully/);
+for (const narrative of ['', 'SHOTGUN for Dedicated sport shooting.', '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]', 'TODO '.repeat(30)]) assert.ok(engine.motivationReleaseIssues(sources, { ...review, narrative }).some(i => /substantive personal motivation/.test(i)));
+const optional = structuredClone(sources); optional.firearm.model = null; optional.client.suburb = 'Cato Ridge'; optional.client.city = ' Cato Ridge ';
+const optionalText = await textOf(await engine.populateCanonicalMotivation(master, optional, review, '2026-10-10'));
+assert.doesNotMatch(optionalText, /MODEL NOT RECORDED|Model:|Cato Ridge, Cato Ridge/);
+assert.deepEqual(engine.motivationReleaseIssues(optional, review), []);
+const placeholderSource = structuredClone(sources); placeholderSource.firearm.model = '[MODEL NOT RECORDED]';
+assert.ok(engine.motivationReleaseIssues(placeholderSource, review).some(i => /placeholder/.test(i)));
+const renderer = loader()('src/engines/docxPdfRenderer.ts');
+const printable = await PDFDocument.load(await renderer.renderCanonicalMotivationAsPdf(generated));
+assert.ok(printable.getPageCount() > 1, 'actual PDF is paginated, not a renderer mock');
+for (const page of printable.getPages()) { assert.ok(Math.abs(page.getWidth() - 595.28) < .01); assert.ok(Math.abs(page.getHeight() - 841.89) < .01); }
+const pagination = JSON.parse(printable.getSubject());
+assert.equal(pagination.pageCount, printable.getPageCount());
+assert.deepEqual(pagination.indexPages, pagination.sectionPages);
+assert.ok(pagination.sectionPages.lg_motivation_257 > 1);
+// Inspect actual PDF drawing operators, not just the pagination metadata.
+const operators = printable.getPages().map(page => Array.from({ length: page.node.Contents().size() }, (_, i) => {
+  const stream = printable.context.lookup(page.node.Contents().get(i));
+  return inflateSync(stream.getContents()).toString();
+}).join('\n'));
+const pdfFont = await printable.embedFont('Times-Roman');
+const encoded = text => pdfFont.encodeText(text).toString();
+assert.ok(operators[pagination.sectionPages.lg_motivation_257 - 1].includes(encoded('NEW APPLICATION')), 'index points to the actual heading page');
+assert.ok(operators.every(content => content.includes(' 11 Tf')), 'readable 11-point body text on every page');
+assert.ok(operators.every(content => !content.includes(encoded('lg_motivation_'))), 'no internal index markers printed');
+const historical = evidence('old-v1', 'MOTIVATION', { is_generated: true, metadata: { motivationMappingVersion: 'CANONICAL_V1', motivationSourceSnapshot: 'same', motivationConfirmedSnapshot: 'same' } });
+assert.equal(state.currentMotivation([historical], 'case').id, 'old-v1');
+assert.equal(state.motivationState(historical, 'same'), 'OUTDATED');
 
 for (const section of ['13', '15', '16', '17']) {
   const s = structuredClone(sources); s.application.licence_section = section; s.application.primary_purpose = `Applicant-selected purpose ${section}`;
@@ -75,6 +110,7 @@ const claim = { documentId: 'research', sourceId: 'source', text: 'A source-supp
 claim.sourceSnapshot = state.stableMotivationJson(engine.motivationResearchSources(sources)[0]);
 const researched = { ...review, claims: [claim] };
 assert.match(await textOf(await engine.populateCanonicalMotivation(master, sources, researched, '2026-10-10')), /source-supported test characteristic.*Test manufacturer specification/s);
+assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, sources, { ...researched, claims: [{ ...claim, reviewed: false }] }, '2026-10-10')), /source-supported test characteristic/);
 assert.throws(() => engine.reviewedMotivationClaims(sources, { ...review, claims: [{ ...claim, sourceId: 'invented' }] }), /Research source/);
 assert.throws(() => engine.reviewedMotivationClaims(sources, { ...review, claims: [{ ...claim, section: 'Rarity / Scarcity' }] }), /non-Section-17/);
 const changedResearch = structuredClone(sources); changedResearch.documents.at(-1).metadata.researchSources[0].summary = 'Changed source excerpt';
@@ -84,7 +120,7 @@ assert.equal(engine.motivationResearchSources(oldContext).length, 0, 'research f
 const collectorSources = structuredClone(sources); collectorSources.application.licence_section = '17'; collectorSources.application.primary_purpose = 'Private collection';
 collectorSources.documents.push(evidence('association-approval', 'ENDORSEMENT'), evidence('actual-photograph', 'SUPPORTING_DOCUMENT'));
 const collectorReview = engine.defaultMotivationReview(collectorSources);
-Object.assign(collectorReview, { background: review.background, narrative: 'Applicant explanation of approved collection fit.', assertions: review.assertions, claims: [{ ...claim, section: 'Historical Value' }] });
+Object.assign(collectorReview, { background: review.background, narrative: review.narrative, assertions: review.assertions, claims: [{ ...claim, section: 'Historical Value' }] });
 Object.assign(collectorReview.collector, { category: 'Applicant-confirmed test category', field: 'Documented test collecting field', theme: 'Documented test theme', membership: 'Applicant-confirmed test standing', approvalDocumentId: 'association-approval', photographDocumentId: 'actual-photograph', themeFit: 'Applicant-confirmed test theme fit', points: 'Applicant-confirmed specific observations', regulation15: 'Applicant-reviewed applicability and independent requirements; test only.', confirmed: true, legalReviewed: true });
 assert.deepEqual(engine.motivationReleaseIssues(collectorSources, collectorReview), []);
 const collectorText = await textOf(await engine.populateCanonicalMotivation(master, collectorSources, collectorReview, '2026-10-10'));
@@ -129,7 +165,8 @@ const db = {
   storage: { from: () => ({ upload: async (path, blob) => { assert.equal(storedFiles.has(path), false); storedFiles.set(path, new Uint8Array(await blob.arrayBuffer())); return { error: null }; }, remove: async paths => { paths.forEach(path => storedFiles.delete(path)); return { error: null }; }, createSignedUrl: async path => ({ data: { signedUrl: 'mock:' + path }, error: null }) }) },
 };
 let renderedDocx;
-const load = loader({ '../lib/supabase': { supabase: db }, '../engines/docxPdfRenderer': { renderDocxAsPdf: async bytes => { renderedDocx = bytes; return pdfBytes; } } });
+let renderedPageCount = 0;
+const load = loader({ '../lib/supabase': { supabase: db }, '../engines/docxPdfRenderer': { renderCanonicalMotivationAsPdf: async bytes => { renderedDocx = bytes; const pdf = await renderer.renderCanonicalMotivationAsPdf(bytes); renderedPageCount = (await PDFDocument.load(pdf)).getPageCount(); return pdf; }, renderDocxAsPdf: async () => pdfBytes } });
 const service = load('src/services/motivationService.ts');
 const readinessService = loader({ '../lib/supabase': { supabase: db }, './motivationService': service })('src/services/applicationReadinessService.ts');
 const motivationRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.documentType === 'MOTIVATION');
@@ -177,7 +214,7 @@ try {
   assert.equal(first.owner_user_id, 'owner'); assert.equal(first.record_scope, 'PRIVATE'); assert.equal(first.application_case_id, 'case'); assert.equal(first.firearm_id, 'firearm');
   assert.equal(first.is_verified, false); assert.equal(first.version_number, 1); assert.equal(first.metadata.motivationSourceSnapshot, snapshot);
   assert.doesNotMatch(await textOf(renderedDocx), /8x68S|Mauser|34853/);
-  assert.equal((await PDFDocument.load(storedFiles.get(first.storage_path))).getPageCount(), 7, '3 actual annexures with marker pages embedded');
+  assert.equal((await PDFDocument.load(storedFiles.get(first.storage_path))).getPageCount(), renderedPageCount + 6, 'paginated Motivation and 3 actual annexures with marker pages embedded');
   await assert.rejects(service.confirmMotivation(identity, first.id), /Review and regenerate/);
   await service.markMotivationReviewed(identity, first.id); await service.confirmMotivation(identity, first.id);
   await service.assertCurrentMotivationReleased(identity, first.id);
@@ -188,7 +225,7 @@ try {
   assert.equal((await motivationRequirement()).state, 'PENDING_GENERATION');
   await assert.rejects(service.assertCurrentMotivationReleased(identity, first.id), /current Motivation/);
   await assert.rejects(service.confirmMotivation(identity, first.id), /Review and regenerate/);
-  const corrected = { ...review, narrative: 'Corrected applicant explanation.' };
+  const corrected = { ...review, narrative: 'Corrected applicant explanation. ' + review.narrative };
   const second = await service.generateMotivation(identity, corrected);
   assert.equal(second.version_number, 2); assert.equal(second.parent_document_id, first.id); assert.equal(second.is_verified, false);
   assert.ok(tables.documents.some(d => d.id === first.id)); assert.ok(storedFiles.has(first.storage_path), 'history PDF retained');
@@ -237,6 +274,19 @@ try {
   await assert.rejects(service.assertCurrentMotivationReleased(identity, first.id), /current Motivation/);
   const third = await service.generateMotivation(identity, corrected);
   assert.equal(third.version_number, 3); assert.equal(third.parent_document_id, second.id);
+  const oldMapping = tables.documents.find(d => d.id === third.id);
+  oldMapping.metadata.motivationMappingVersion = 'CANONICAL_V1';
+  assert.equal((await service.getMotivationWorkspace(identity)).state, 'OUTDATED');
+  assert.ok((await service.getMotivationWorkspace(identity)).history.some(d => d.id === third.id));
+  await assert.rejects(service.confirmMotivation(identity, third.id), /Review and regenerate/);
+  const fourth = await service.generateMotivation(identity, corrected);
+  assert.equal(fourth.version_number, 4); assert.equal(fourth.parent_document_id, third.id);
+  assert.equal(fourth.metadata.motivationMappingVersion, 'CANONICAL_V2');
+  assert.ok(storedFiles.has(third.storage_path), 'V1 bytes stay in history');
+  const unfinished = await service.generateMotivation(identity, { ...review, narrative: '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]' });
+  await service.markMotivationReviewed(identity, unfinished.id);
+  await assert.rejects(service.confirmMotivation(identity, unfinished.id), /substantive personal motivation|placeholder/);
+  await assert.rejects(service.assertCurrentMotivationReleased(identity, unfinished.id), /current Motivation/);
   currentUser = 'other'; await assert.rejects(service.loadMotivationSources(identity), /owner/);
   await assert.rejects(service.loadMotivationSources({ ...identity, userId: 'other' }), /authorized application/); currentUser = 'owner';
   storedFiles.delete('dealer/client/id-proof.pdf');

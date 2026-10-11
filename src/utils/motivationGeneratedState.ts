@@ -1,10 +1,10 @@
 import type { DocumentRecord } from '../types/document';
 
 export const CANONICAL_MOTIVATION_HASH = 'd87785faa295333f7b1b9bbc4b0107effe54759160d71cb28ce77665c26c0bb2';
-export const MOTIVATION_MAPPING_VERSION = 'CANONICAL_V1';
+export const MOTIVATION_MAPPING_VERSION = 'CANONICAL_V2';
 export type MotivationState = 'NOT_GENERATED' | 'OUTDATED' | 'AWAITING_REVIEW' | 'CONFIRMED';
 export function isCanonicalMotivation(d: DocumentRecord): boolean {
-  return d.document_type === 'MOTIVATION' && d.is_generated && d.metadata?.motivationMappingVersion === MOTIVATION_MAPPING_VERSION;
+  return d.document_type === 'MOTIVATION' && d.is_generated && ['CANONICAL_V1', MOTIVATION_MAPPING_VERSION].includes(d.metadata?.motivationMappingVersion as string);
 }
 export function latestMotivation(documents: DocumentRecord[], caseId: string): DocumentRecord | undefined {
   return documents.filter(d => isCanonicalMotivation(d) && d.application_case_id === caseId)
@@ -17,7 +17,7 @@ export function currentMotivation(documents: DocumentRecord[], caseId: string): 
 }
 export function motivationState(document: DocumentRecord | undefined, snapshot: string): MotivationState {
   if (!document) return 'NOT_GENERATED';
-  if (document.metadata.motivationSourceSnapshot !== snapshot) return 'OUTDATED';
+  if (document.metadata.motivationMappingVersion !== MOTIVATION_MAPPING_VERSION || document.metadata.motivationSourceSnapshot !== snapshot) return 'OUTDATED';
   return document.is_verified && document.metadata.motivationConfirmedSnapshot === snapshot ? 'CONFIRMED' : 'AWAITING_REVIEW';
 }
 export function stableMotivationJson(value: unknown): string {

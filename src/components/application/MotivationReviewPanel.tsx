@@ -37,6 +37,10 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
   const dirty = stableMotivationJson(review) !== stableMotivationJson(workspace.review);
   const evidence = applicableMotivationEvidence(workspace.sources);
   const research = motivationResearchSources(workspace.sources);
+  const eligibleClaims = review.claims.filter(c => c.reviewed && c.text.trim() && research.some(s => s.documentId === c.documentId && s.id === c.sourceId && c.sourceSnapshot === stableMotivationJson(s)));
+  const researchDocuments = workspace.sources.documents.filter(d => d.document_type === 'SUPPORTING_RESEARCH');
+  const excludedResearch = researchDocuments.filter(d => !research.some(s => s.documentId === d.id));
+  const unavailableClaims = review.claims.filter(c => !research.some(s => s.documentId === c.documentId && s.id === c.sourceId));
   const collector = workspace.sources.application.licence_section === '17';
   const preview = async (document = workspace.current) => {
     if (!document) return;
@@ -47,12 +51,16 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
     <Text style={textStyle}>Current version: {workspace.current?.version_number ?? 'Not generated'} · {dirty ? 'Corrections require regeneration' : workspace.state}</Text>
     <TextField editable={!busy} label="Applicant background (confirm personal facts)" multiline value={review.background} maxLength={6000} onChangeText={background => update({ background })} />
     <TextField editable={!busy} label="Application-specific motivation / lawful need" multiline value={review.narrative} maxLength={12000} onChangeText={narrative => update({ narrative })} />
+    <Text style={textStyle}>Describe your actual participation or use, how you intend to use this firearm, why it suits that purpose, and your relevant personal circumstances. The saved application summary supplies an initial draft only. Provide substantive applicant-specific facts (at least 20 words); a purpose label alone cannot be released. Research cannot supply your personal history.</Text>
     <Text style={textStyle}>Confirm each statement only if true. Unknown or conflicting answers block release; correct stored details through the existing profile/application screens.</Text>
     {Object.entries(MASTER_ASSERTIONS).map(([key, a]) => <Button key={key} disabled={busy} variant="secondary" title={`${review.assertions[key] ? '✓ ' : 'Confirm: '}${a.label}`} onPress={() => update({ assertions: { ...review.assertions, [key]: !review.assertions[key] } })} />)}
     <Text style={textStyle}>Verified annexures — select only evidence applicable to this application.</Text>
     {evidence.map(d => <View key={d.id}><Button disabled={busy} variant="secondary" title={`${review.evidenceIds.includes(d.id) ? '✓ ' : ''}${d.document_name}`} onPress={() => update({ evidenceIds: review.evidenceIds.includes(d.id) ? review.evidenceIds.filter(id => id !== d.id) : [...review.evidenceIds, d.id] })} /><Button disabled={busy} title="Review supporting file" variant="ghost" onPress={() => void run(() => preview(d), false)} /></View>)}
     {review.evidenceIds.some(id => !evidence.some(d => d.id === id)) && <Button disabled={busy} title="Remove unavailable or no-longer-verified annexures" onPress={() => update({ evidenceIds: review.evidenceIds.filter(id => evidence.some(d => d.id === id)) })} />}
     <Text style={textStyle}>Research claims — inspect the original source, correct the claim, then explicitly mark it reviewed. Unreviewed results are omitted.</Text>
+    <Text style={textStyle}>Available source publications: {research.length}. Reviewed source-backed claims eligible for inclusion: {eligibleClaims.length}. Sources requiring claim review: {research.filter(s => !eligibleClaims.some(c => c.documentId === s.documentId && c.sourceId === s.id)).length}. Excluded/unavailable Research documents: {excludedResearch.length}. Unavailable saved claims: {unavailableClaims.length}.</Text>
+    {research.length === 0 && <Text style={textStyle}>No eligible source publications are available for this firearm and application. Use the existing application Research workflow, review its sources, then reload here. Research PDFs or summaries alone are not confirmed claims.</Text>}
+    {excludedResearch.map(d => <Text key={d.id} style={textStyle}>Excluded Research: {d.document_name} — inactive, different application/firearm context, or missing usable source metadata. It is not included in the Motivation.</Text>)}
     {review.claims.some(c => !research.some(s => s.documentId === c.documentId && s.id === c.sourceId)) && <Button disabled={busy} title="Remove claims whose Research sources are no longer available" onPress={() => update({ claims: review.claims.filter(c => research.some(s => s.documentId === c.documentId && s.id === c.sourceId)) })} />}
     {research.map(source => {
       const claim = review.claims.find(c => c.documentId === source.documentId && c.sourceId === source.id);
@@ -60,7 +68,7 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
       const claimReviewed = claim?.reviewed && claim.sourceSnapshot === sourceSnapshot;
       const change = (patch: Partial<NonNullable<typeof claim>>) => update({ claims: [...review.claims.filter(c => !(c.documentId === source.documentId && c.sourceId === source.id)), { documentId: source.documentId, sourceId: source.id, text: claim?.text ?? source.summary ?? '', section: claim?.section ?? 'Firearm relevance', reviewed: claim?.reviewed ?? false, ...patch }] });
       return <View key={`${source.documentId}:${source.id}`}>
-        <Text style={textStyle}>{source.title}</Text>
+        <Text style={textStyle}>{source.title} — {claimReviewed && claim?.text.trim() ? 'Reviewed claim eligible for inclusion' : 'Claim requires review; excluded until reviewed'}</Text>
         <Button title="Open original Research source" disabled={busy} variant="ghost" onPress={() => void run(() => openExternalDocument(() => source.url!, { originatingRoute: 'ApplicationReadiness', workflowStep: 'motivation-research' }), false)} />
         <TextField editable={!busy} label="Supported claim" multiline maxLength={3000} value={claim?.text ?? source.summary ?? ''} onChangeText={text => change({ text, reviewed: false })} />
         {collector && <View>{['Firearm relevance', ...COLLECTOR_CLAIM_SECTIONS].map(section => <Button key={section} disabled={busy} variant="ghost" title={`${(claim?.section ?? 'Firearm relevance') === section ? '✓ ' : ''}${section}`} onPress={() => change({ section })} />)}</View>}
@@ -85,7 +93,7 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
       <Button disabled={busy || dirty || !read || !confirmAccurate || workspace.issues.length > 0 || workspace.state === 'OUTDATED'} title="Confirm current Motivation" onPress={() => void run(() => confirmMotivation(identity, workspace.current!.id))} />
       <Button disabled={busy || dirty || workspace.state !== 'CONFIRMED'} title="Release confirmed PDF" variant="secondary" onPress={() => void run(async () => { await assertCurrentMotivationReleased(identity, workspace.current!.id); await preview(); }, false)} />
     </>}
-    <Text style={textStyle}>Index page numbers are intentionally blank. Review final pagination before physical submission.</Text>
+    <Text style={textStyle}>The generated A4 Motivation index uses actual section page numbers. Review the regenerated pages and supporting annexures before confirmation.</Text>
     <Text style={textStyle}>Version history (older versions are retained and cannot replace the current version):</Text>
     {workspace.history.map(d => <Button key={d.id} disabled={busy} title={`Review version ${d.version_number}${d.id === workspace.current?.id ? ' — current' : ' — historical'}`} variant="ghost" onPress={() => void run(() => preview(d), false)} />)}
     <Button disabled={busy} title="Reload saved source data / Research" variant="ghost" onPress={() => void load()} />

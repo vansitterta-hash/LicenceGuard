@@ -1,8 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { generatedDocumentPrivacy, registerGeneratedDocument } from './generatedApplicationDocumentService';
-import { renderDocxAsPdf } from '../engines/docxPdfRenderer';
+import { renderDocxAsPdf, renderCanonicalMotivationAsPdf } from '../engines/docxPdfRenderer';
 import { applicableMotivationEvidence, defaultMotivationReview, motivationAnnexures, motivationReleaseIssues, motivationSourceSnapshot, populateCanonicalMotivation } from '../engines/canonicalMotivationEngine';
-import { currentMotivation, latestMotivation, motivationState, MOTIVATION_MAPPING_VERSION, CANONICAL_MOTIVATION_HASH } from '../utils/motivationGeneratedState';
+import { currentMotivation, latestMotivation, isCanonicalMotivation, motivationState, MOTIVATION_MAPPING_VERSION, CANONICAL_MOTIVATION_HASH } from '../utils/motivationGeneratedState';
 import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import type { MotivationReview, MotivationSources } from '../types/motivation';
 import type { DocumentRecord } from '../types/document';
@@ -70,7 +70,7 @@ export async function getMotivationWorkspace(identity: MotivationIdentity) {
   let snapshot = '', issues: string[] = [];
   try { snapshot = motivationSourceSnapshot(sources, review); issues = motivationReleaseIssues(sources, review); }
   catch (error) { issues = [error instanceof Error ? error.message : 'Source evidence changed. Review and regenerate.']; }
-  return { sources, current, review, snapshot, issues, state: motivationState(current, snapshot), history: sources.documents.filter(d => d.application_case_id === identity.applicationCaseId && d.metadata?.motivationMappingVersion === MOTIVATION_MAPPING_VERSION).sort((a, b) => b.version_number - a.version_number) };
+  return { sources, current, review, snapshot, issues, state: motivationState(current, snapshot), history: sources.documents.filter(d => d.application_case_id === identity.applicationCaseId && isCanonicalMotivation(d)).sort((a, b) => b.version_number - a.version_number) };
 }
 
 /** Save corrections to existing private document metadata; the immutable PDF stays in history. */
@@ -100,7 +100,7 @@ export async function generateMotivation(identity: MotivationIdentity, review: M
   if (!response.ok) throw new Error('The locked canonical Master is unavailable.');
   const docx = await populateCanonicalMotivation(new Uint8Array(await response.arrayBuffer()), sources, review, new Date().toISOString().slice(0, 10));
   const pdfLib = await import('pdf-lib/cjs/index.js');
-  const pdf = await pdfLib.PDFDocument.load(await renderDocxAsPdf(docx));
+  const pdf = await pdfLib.PDFDocument.load(await renderCanonicalMotivationAsPdf(docx));
   // Annexures are actually embedded, so a register never claims an absent attachment.
   const annexures = motivationAnnexures(sources, review);
   for (const a of annexures) {
@@ -134,7 +134,7 @@ export async function generateMotivation(identity: MotivationIdentity, review: M
     storage_path: path, file_name: fileName, original_file_name: fileName, document_name: `Section ${sources.application.licence_section} ${sources.firearm.make} ${sources.firearm.calibre} — Motivation`,
     mime_type: 'application/pdf', file_size_bytes: blob.size, document_date: new Date().toISOString().slice(0, 10), is_verified: false, is_generated: true, generated_from_template_id: null, uploaded_by: identity.userId,
     metadata: { motivationMappingVersion: MOTIVATION_MAPPING_VERSION, canonicalMasterHash: CANONICAL_MOTIVATION_HASH, motivationSourceSnapshot: snapshot, motivationReview: review, motivationDraft: review, motivationConfirmedSnapshot: null,
-      motivationReleaseIssues: motivationReleaseIssues(sources, review), annexures: annexures.map(a => ({ letter: a.letter, documentId: a.document.id })), paginationNotice: 'Index page numbers intentionally blank; inspect physical pagination before submission.' } });
+      motivationReleaseIssues: motivationReleaseIssues(sources, review), annexures: annexures.map(a => ({ letter: a.letter, documentId: a.document.id })), paginationNotice: 'A4 Motivation index reflects generated section pages; supporting annexures follow the Motivation.' } });
 }
 
 export async function markMotivationReviewed(identity: MotivationIdentity, documentId: string): Promise<void> {
