@@ -306,6 +306,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
           model: context.firearm.model,
           calibre: context.firearm.calibre,
           firearmType: context.firearm.firearmType,
+          firearmConfiguration: context.firearm.firearmConfiguration,
+          firearmConfigurationOther: context.firearm.firearmConfigurationOther,
         },
       });
       if (result.sourceCount === 0) throw new Error('The provider returned no usable source results.');

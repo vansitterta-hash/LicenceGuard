@@ -1,5 +1,6 @@
 import { removeSafeRecord } from '../services/safeDeletionService';
 import { supabase } from '../lib/supabase';
+import { firearmConfigurationFields } from '../utils/firearmConfiguration';
 import type {
   FirearmFormValues,
   FirearmLicenceRecord,
@@ -192,6 +193,7 @@ function buildFirearmPayload(
     calibre: values.calibre.trim(),
     serial_number: values.serialNumber.trim(),
     firearm_type: values.firearmType,
+    ...firearmConfigurationFields(values.firearmType, values.firearmConfiguration, values.firearmConfigurationOther),
     required_competency: values.requiredCompetency,
     competency_override_reason: emptyToNull(
       values.competencyOverrideReason

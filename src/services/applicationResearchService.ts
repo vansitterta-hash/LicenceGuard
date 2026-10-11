@@ -2,6 +2,12 @@ import { REFERENCE_LIBRARY_ITEMS, type ReferenceLibraryItem } from '../data/refe
 import { supabase } from '../lib/supabase';
 import { generatedDocumentPrivacy, registerGeneratedDocument } from './generatedApplicationDocumentService';
 import type { ApplicationResearchContext, ResearchSource, ResearchSubjectType } from '../types/research';
+import { recordedFirearmConfiguration } from '../utils/firearmConfiguration';
+
+function researchFirearm<T extends { firearmType: string | null; firearmConfiguration?: string | null; firearmConfigurationOther?: string | null }>(firearm: T): T {
+  const recorded = recordedFirearmConfiguration(firearm.firearmType ?? '', firearm.firearmConfiguration, firearm.firearmConfigurationOther);
+  return { ...firearm, firearmConfiguration: recorded.firearm_configuration, firearmConfigurationOther: recorded.firearm_configuration_other };
+}
 
 export async function requestLiveApplicationResearch(input: {
   applicationType: string;
@@ -9,7 +15,7 @@ export async function requestLiveApplicationResearch(input: {
   purpose: string | null;
   discipline: string | null;
   association: string | null;
-  firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null };
+  firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null; firearmConfiguration?: string | null; firearmConfigurationOther?: string | null };
 }): Promise<ApplicationResearchContext> {
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session?.access_token) {
@@ -22,7 +28,7 @@ export async function requestLiveApplicationResearch(input: {
       Authorization: `Bearer ${data.session.access_token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, firearm: researchFirearm(input.firearm) }),
   });
   const result = await response.json() as ApplicationResearchContext & { error?: string };
   if (!response.ok) throw new Error(result.error ?? 'Live application research is unavailable.');
@@ -262,7 +268,7 @@ export function buildApplicationResearchContext(input: {
   applicationType: string;
   licenceSection: string | null;
   motivationSummary: string | null;
-  firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null } | null;
+  firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null; firearmConfiguration?: string | null; firearmConfigurationOther?: string | null } | null;
   sportDiscipline?: string | null;
   sportAssociation?: string | null;
 }): ApplicationResearchContext {
@@ -311,7 +317,7 @@ export function buildApplicationResearchContext(input: {
     purpose: input.motivationSummary,
     discipline,
     association,
-    firearm: input.firearm,
+    firearm: input.firearm ? researchFirearm(input.firearm) : null,
     sourceCount: sources.length,
     sources,
     findings,

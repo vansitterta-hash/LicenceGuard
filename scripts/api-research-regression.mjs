@@ -1,5 +1,20 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { loader } from './beta-test-support.mjs';
 import handler from '../api/application-research.js';
+
+const apiCode = readFileSync('api/application-research.js', 'utf8');
+const validateConfiguration = new Function(apiCode.slice(0, apiCode.indexOf('function subjectType')) + '; return validResearchInput;')();
+const { FIREARM_CONFIGURATIONS, FIREARM_CONFIGURATION_TYPES } = loader()('src/utils/firearmConfiguration.ts');
+for (const [type, permitted] of Object.entries(FIREARM_CONFIGURATION_TYPES)) {
+  const body = configuration => ({ firearm: { firearmType: type, calibre: 'Test calibre', firearmConfiguration: configuration, firearmConfigurationOther: configuration === 'OTHER' ? 'Recorded compatible description' : null } });
+  assert.equal(validateConfiguration(body(null)).firearmConfiguration, '', 'NULL must not be inferred');
+  for (const option of FIREARM_CONFIGURATIONS) {
+    const valid = validateConfiguration(body(option.value));
+    if (permitted.includes(option.value)) assert.equal(valid.firearmConfiguration, option.value);
+    else assert.equal(valid, null, 'incompatible configuration rejected before provider search');
+  }
+}
 
 const previousFetch = globalThis.fetch;
 const previousValues = {
@@ -81,7 +96,7 @@ try {
     purpose: 'Dedicated sport shooting',
     discipline: 'Skeet',
     association: 'Sport Association',
-    firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN', serialNumber: '1165306' },
+    firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN', firearmConfiguration: 'OVER_UNDER', serialNumber: '1165306' },
   }), response);
   assert.equal(response.statusCode, 200);
   assert.equal(providerRequests.length, 2);
@@ -99,6 +114,8 @@ try {
   assert.equal(purposePayload.country, 'south africa');
   assert.doesNotMatch(purposePayload.query, /1165306/);
   assert.equal(response.body.firearm.model, null);
+  assert.equal(response.body.firearm.firearmConfiguration, 'OVER_UNDER');
+  assert.match(payload.query, /OVER UNDER/);
   assert.equal(response.body.sourceCount, 6);
   assert.equal(new Set(response.body.sources.map(s => s.url)).size, 6);
   assert.ok(response.body.sources.some(s => s.url.includes('/technical/')));
@@ -117,6 +134,7 @@ try {
   const storedModel = createResponse();
   await handler(request({ licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: 'Stored test model', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } }), storedModel);
   assert.equal(storedModel.statusCode, 200);
+  assert.equal(storedModel.body.firearm.firearmConfiguration, null, 'unknown configuration is not inferred from make/model');
   assert.match(JSON.parse(providerRequests[2].options.body).query, /CZ Stored test model 12 BR SHOTGUN/);
   const publication = (id, title, content) => ({ id, title, content, url: `https://example.test/${id}` });
   const navigation = publication('navigation', 'CZ shotgun specifications and Skeet rules', 'Home Contact us Log in Privacy policy Menu CZ shotgun manufacturer specifications skeet competition hunting rifle');

@@ -1,4 +1,5 @@
 import type { CompetencyCategory } from './competency';
+import type { FirearmConfiguration } from '../utils/firearmConfiguration';
 
 export type FirearmType =
   | 'PISTOL'
@@ -33,6 +34,8 @@ export type FirearmRecord = {
   serial_number: string;
 
   firearm_type: FirearmType;
+  firearm_configuration?: FirearmConfiguration | null;
+  firearm_configuration_other?: string | null;
   required_competency: CompetencyCategory;
   competency_override_reason: string | null;
 
@@ -91,6 +94,8 @@ export type FirearmFormValues = {
   serialNumber: string;
 
   firearmType: FirearmType;
+  firearmConfiguration?: FirearmConfiguration | null;
+  firearmConfigurationOther?: string;
   requiredCompetency: CompetencyCategory;
   competencyOverrideReason: string;
 

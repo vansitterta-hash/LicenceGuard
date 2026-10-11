@@ -4,6 +4,7 @@ import type { ApplicationCaseType } from '../types/applicationCase';
 import type { FirearmType } from '../types/firearm';
 import { buildApplicationResearchContext } from './applicationResearchService';
 import { addReferenceDocumentToClient } from './referenceLibraryService';
+import { recordedFirearmConfiguration } from '../utils/firearmConfiguration';
 
 const db = supabase as any;
 
@@ -43,6 +44,8 @@ type CaseContext = {
     calibre: string;
     serialNumber: string;
     firearmType: FirearmType;
+    firearmConfiguration?: string | null;
+    firearmConfigurationOther?: string | null;
   } | null;
 };
 
@@ -277,6 +280,8 @@ export async function getApplicationDocumentContext(applicationCaseId: string): 
       calibre: firearmResult.data.calibre,
       serialNumber: firearmResult.data.serial_number,
       firearmType: firearmResult.data.firearm_type,
+      firearmConfiguration: recordedFirearmConfiguration(firearmResult.data.firearm_type, firearmResult.data.firearm_configuration, firearmResult.data.firearm_configuration_other).firearm_configuration,
+      firearmConfigurationOther: recordedFirearmConfiguration(firearmResult.data.firearm_type, firearmResult.data.firearm_configuration, firearmResult.data.firearm_configuration_other).firearm_configuration_other,
     } : null,
   };
 }
@@ -292,6 +297,8 @@ export async function suggestApplicationDocuments(applicationCaseId: string): Pr
       model: context.firearm.model,
       calibre: context.firearm.calibre,
       firearmType: context.firearm.firearmType,
+      firearmConfiguration: context.firearm.firearmConfiguration,
+      firearmConfigurationOther: context.firearm.firearmConfigurationOther,
     } : null,
     sportDiscipline: context.sportDiscipline,
     sportAssociation: context.sportAssociation,

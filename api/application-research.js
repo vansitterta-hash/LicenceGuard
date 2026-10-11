@@ -1,3 +1,18 @@
+const MANUAL = ['BOLT_ACTION', 'STRAIGHT_PULL', 'LEVER_ACTION', 'PUMP_ACTION', 'FALLING_BLOCK', 'BREAK_ACTION', 'ROLLING_BLOCK', 'SINGLE_SHOT', 'SINGLE_SHOT_BREAK_ACTION', 'OTHER'];
+const FIREARM_CONFIGURATION_TYPES = {
+  PISTOL: ['SEMI_AUTOMATIC', 'SINGLE_SHOT', 'SINGLE_SHOT_BREAK_ACTION', 'OTHER'],
+  REVOLVER: ['SINGLE_ACTION', 'DOUBLE_ACTION', 'DOUBLE_ACTION_ONLY', 'OTHER'],
+  BOLT_ACTION_RIFLE: ['BOLT_ACTION', 'STRAIGHT_PULL'],
+  LEVER_ACTION_RIFLE: ['LEVER_ACTION'],
+  MANUAL_RIFLE: MANUAL,
+  MANUAL_CARBINE: MANUAL,
+  SHOTGUN: ['OVER_UNDER', 'SIDE_BY_SIDE', 'PUMP_ACTION', 'SEMI_AUTOMATIC', 'SINGLE_SHOT', 'SINGLE_SHOT_BREAK_ACTION', 'BOLT_ACTION', 'LEVER_ACTION', 'OTHER'],
+  SELF_LOADING_RIFLE: ['SEMI_AUTOMATIC'],
+  HAND_MACHINE_CARBINE: ['SEMI_AUTOMATIC', 'AUTOMATIC', 'SELECTIVE_FIRE', 'OTHER'],
+  PISTOL_CALIBRE_CARBINE: ['SEMI_AUTOMATIC', 'BOLT_ACTION', 'STRAIGHT_PULL', 'LEVER_ACTION', 'PUMP_ACTION', 'SINGLE_SHOT', 'SINGLE_SHOT_BREAK_ACTION', 'OTHER'],
+  OTHER: ['OTHER'],
+};
+
 const requestCounts = new Map();
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 8;
@@ -22,7 +37,12 @@ function validResearchInput(body) {
     firearmModel: boundedText(body?.firearm?.model, 100),
     calibre: boundedText(body?.firearm?.calibre, 40),
     firearmType: boundedText(body?.firearm?.firearmType, 60),
+    firearmConfiguration: boundedText(body?.firearm?.firearmConfiguration, 30),
+    firearmConfigurationOther: boundedText(body?.firearm?.firearmConfigurationOther, 120),
   };
+  if (fields.firearmConfiguration && (!FIREARM_CONFIGURATION_TYPES[fields.firearmType]?.includes(fields.firearmConfiguration))) return null;
+  if (fields.firearmConfiguration === 'OTHER' && !fields.firearmConfigurationOther) return null;
+  if (fields.firearmConfiguration !== 'OTHER') fields.firearmConfigurationOther = '';
   const serialized = Object.values(fields).join(' ');
   if (!fields.calibre
     || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(serialized)
@@ -146,6 +166,7 @@ export default async function handler(request, response) {
     fields.firearmModel,
     fields.calibre,
     fields.firearmType,
+    fields.firearmConfiguration === 'OTHER' ? fields.firearmConfigurationOther : fields.firearmConfiguration.replaceAll('_', ' '),
     shotgunAlias,
     'manufacturer specifications technical characteristics firearm history production background sporting suitability',
   ].filter(Boolean).join(' ').slice(0, 700);
@@ -248,6 +269,8 @@ export default async function handler(request, response) {
         model: fields.firearmModel || null,
         calibre: fields.calibre || null,
         firearmType: fields.firearmType || null,
+        firearmConfiguration: fields.firearmConfiguration || null,
+        firearmConfigurationOther: fields.firearmConfigurationOther || null,
       },
       sourceCount: sources.length,
       sources,

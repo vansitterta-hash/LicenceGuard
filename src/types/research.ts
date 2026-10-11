@@ -55,6 +55,8 @@ export type ApplicationResearchContext = {
     model: string | null;
     calibre: string | null;
     firearmType: string | null;
+    firearmConfiguration?: string | null;
+    firearmConfigurationOther?: string | null;
   } | null;
   sourceCount: number;
   sources: ResearchSource[];

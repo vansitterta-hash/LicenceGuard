@@ -196,6 +196,40 @@ assert.throws(() => engine.motivationAnnexures(sources, { ...review, evidenceIds
 const claim = { documentId: 'research', sourceId: 'source', text: 'A source-supported test characteristic.', section: 'Firearm relevance', reviewed: true };
 claim.sourceSnapshot = state.stableMotivationJson(engine.motivationResearchSources(sources)[0]);
 const researched = { ...review, claims: [claim] };
+const configured = structuredClone(sources);
+configured.firearm.model = null;
+configured.firearm.firearm_configuration = 'OVER_UNDER';
+configured.firearm.firearm_configuration_other = null;
+const configurationSnapshot = engine.motivationSourceSnapshot(configured, review);
+assert.notEqual(configurationSnapshot, engine.motivationSourceSnapshot({ ...configured, firearm: { ...configured.firearm, firearm_configuration: null } }, review));
+const configurationText = await textOf(await engine.populateCanonicalMotivation(master, configured, review, '2026-10-10'));
+assert.match(configurationText, /Configuration: Over-and-Under/);
+assert.doesNotMatch(configurationText, /Model:/);
+assert.equal(engine.motivationResearchSources(configured).length, 0, 'Research predating configuration requires refreshed context');
+assert.throws(() => engine.reviewedMotivationClaims(configured, researched), /Research source/);
+configured.documents.find(d => d.id === 'research').metadata.researchContext = { firearm: { make: 'CZ', firearmConfiguration: 'OVER_UNDER', firearmConfigurationOther: null } };
+assert.equal(engine.motivationResearchSources(configured).length, 1);
+const changedConfiguration = structuredClone(configured); changedConfiguration.firearm.firearm_configuration = 'PUMP_ACTION';
+assert.equal(engine.motivationResearchSources(changedConfiguration).length, 0);
+assert.notEqual(configurationSnapshot, engine.motivationSourceSnapshot(changedConfiguration, review));
+for (const [type, configuration, label] of [
+  ['PISTOL', 'SEMI_AUTOMATIC', 'Semi-automatic'],
+  ['REVOLVER', 'DOUBLE_ACTION_ONLY', 'Double-action-only'],
+  ['BOLT_ACTION_RIFLE', 'STRAIGHT_PULL', 'Straight-pull'],
+  ['MANUAL_CARBINE', 'FALLING_BLOCK', 'Falling-block'],
+  ['MANUAL_RIFLE', 'SINGLE_SHOT_BREAK_ACTION', 'Single-shot break-action'],
+  ['SHOTGUN', 'SINGLE_SHOT_BREAK_ACTION', 'Single-shot break-action'],
+  ['HAND_MACHINE_CARBINE', 'SELECTIVE_FIRE', 'Selective-fire'],
+]) {
+  const firearm = { ...configured.firearm, firearm_type: type, firearm_configuration: configuration };
+  const text = await textOf(await engine.populateCanonicalMotivation(master, { ...configured, firearm }, review, '2026-10-10'));
+  assert.ok(text.includes(`Configuration: ${label}`));
+  assert.doesNotMatch(text, /Model:/, 'configuration does not establish model identity');
+  const unknown = await textOf(await engine.populateCanonicalMotivation(master, { ...configured, firearm: { ...firearm, firearm_configuration: null } }, review, '2026-10-10'));
+  assert.doesNotMatch(unknown, /Configuration:/, 'category alone must not infer configuration');
+}
+const incompatibleConfiguration = await textOf(await engine.populateCanonicalMotivation(master, { ...configured, firearm: { ...configured.firearm, firearm_type: 'BOLT_ACTION_RIFLE', firearm_configuration: 'SEMI_AUTOMATIC' } }, review, '2026-10-10'));
+assert.doesNotMatch(incompatibleConfiguration, /Configuration:/, 'incompatible canonical data cannot establish a configuration');
 // A new successful run changes candidates, never historical approvals or rows.
 const rerunSources = structuredClone(sources);
 rerunSources.documents.at(-1).metadata.researchContext = { generatedAt: '2026-10-10T09:00:00Z', discipline: 'Trap', provider: 'EXTERNAL_PROVIDER' };

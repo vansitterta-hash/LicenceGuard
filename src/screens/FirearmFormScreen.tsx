@@ -48,6 +48,7 @@ import {
   type LicenceStatus,
 } from '../types/firearm';
 import type { RootStackParamList } from '../types/navigation';
+import { firearmConfigurationOptions, firearmConfigurationFields, firearmConfigurationForTypeChange } from '../utils/firearmConfiguration';
 
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -60,6 +61,8 @@ const EMPTY_FORM: FirearmFormValues = {
   calibre: '',
   serialNumber: '',
   firearmType: 'PISTOL',
+  firearmConfiguration: null,
+  firearmConfigurationOther: '',
   requiredCompetency: 'HANDGUN',
   competencyOverrideReason: '',
   firearmNotes: '',
@@ -120,6 +123,8 @@ export default function FirearmFormScreen({
             calibre: firearm.calibre,
             serialNumber: firearm.serial_number,
             firearmType: firearm.firearm_type,
+            firearmConfiguration: firearm.firearm_configuration ?? null,
+            firearmConfigurationOther: firearm.firearm_configuration_other ?? '',
             requiredCompetency:
               firearm.required_competency,
             competencyOverrideReason:
@@ -196,6 +201,7 @@ export default function FirearmFormScreen({
     setValues((current) => ({
       ...current,
       firearmType,
+      ...firearmConfigurationForTypeChange(current.firearmType, firearmType, current.firearmConfiguration, current.firearmConfigurationOther),
       requiredCompetency: competency,
     }));
   };
@@ -210,6 +216,8 @@ export default function FirearmFormScreen({
 
   const validate = (): boolean => {
     const nextErrors: typeof errors = {};
+    try { firearmConfigurationFields(values.firearmType, values.firearmConfiguration, values.firearmConfigurationOther); }
+    catch (error) { Alert.alert('Firearm configuration', error instanceof Error ? error.message : 'Invalid configuration.'); return false; }
 
     if (!values.make.trim()) {
       nextErrors.make = 'Enter the firearm make.';
@@ -408,6 +416,11 @@ export default function FirearmFormScreen({
       </Card>
 
       <Card title="Firearm details">
+        <View style={styles.formGap}>
+          <Text style={styles.selectedHint}>Firearm configuration</Text>
+          {[{ value: null, label: 'Unknown / not recorded' }, ...firearmConfigurationOptions(values.firearmType)].map(option => <Button key={option.value ?? 'unknown'} title={`${values.firearmConfiguration === option.value ? '✓ ' : ''}${option.label}`} variant="secondary" onPress={() => setValues(current => ({ ...current, firearmConfiguration: option.value, firearmConfigurationOther: option.value === 'OTHER' ? current.firearmConfigurationOther : '' }))} />)}
+          {values.firearmConfiguration === 'OTHER' && <TextField label="Other firearm configuration" value={values.firearmConfigurationOther ?? ''} maxLength={120} onChangeText={value => updateValue('firearmConfigurationOther', value)} />}
+        </View>
         <View style={styles.formGap}>
           <View style={styles.twoColumnRow}>
             <TextField

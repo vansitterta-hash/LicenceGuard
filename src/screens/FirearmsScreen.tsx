@@ -40,6 +40,7 @@ import { Spacing } from '../theme/spacing';
 import { Typography } from '../theme/typography';
 import type { ClientRecord } from '../types/client';
 import type { FirearmListItem } from '../types/firearm';
+import { firearmConfigurationLabel } from '../utils/firearmConfiguration';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<
@@ -408,6 +409,7 @@ function FirearmCard({
       </View>
 
       <View style={styles.detailsGrid}>
+        <Detail label="Firearm configuration" value={firearmConfigurationLabel(firearm.firearm_configuration, firearm.firearm_configuration_other)} />
         <Detail
           label="Firearm type"
           value={getFirearmTypeLabel(

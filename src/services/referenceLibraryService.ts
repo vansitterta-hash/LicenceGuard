@@ -86,7 +86,7 @@ export async function addReferenceDocumentToClient(
       provider: string;
       discipline: string | null;
       association: string | null;
-      firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null } | null;
+      firearm: { make: string | null; model: string | null; calibre: string | null; firearmType: string | null; firearmConfiguration?: string | null; firearmConfigurationOther?: string | null } | null;
       sourceUrl: string | null;
       sourceTitle: string | null;
       sourcePublisher: string | null;
