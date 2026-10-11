@@ -98,9 +98,21 @@ export function motivationResearchRuns(s: MotivationSources) {
   const current = runs.find(run => run.live && run.matchesContext) ?? null;
   return { current, previous: runs.filter(run => run !== current) };
 }
+export function resolvedMotivationEvidenceIds(s: MotivationSources, review: MotivationReview): string[] {
+  const ids = new Set(review.evidenceIds);
+  if (s.application.licence_section === '16') {
+    const eligible = applicableMotivationEvidence(s);
+    for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
+      if (eligible.some(d => d.document_type === type && ids.has(d.id))) continue;
+      const document = eligible.find(d => d.document_type === type);
+      if (document) ids.add(document.id);
+    }
+  }
+  return [...ids].sort();
+}
 export function motivationAnnexures(s: MotivationSources, review: MotivationReview): MotivationAnnexure[] {
   const allowed = new Map(applicableMotivationEvidence(s).map(d => [d.id, d]));
-  const ids = [...new Set(review.evidenceIds)].sort();
+  const ids = resolvedMotivationEvidenceIds(s, review);
   if (ids.length > 26 || ids.some(id => !allowed.has(id))) throw new Error('Annexures must be actual applicable verified supporting files (maximum 26).');
   return ids.map((id, i) => ({ letter: String.fromCharCode(65 + i), document: allowed.get(id)! }));
 }

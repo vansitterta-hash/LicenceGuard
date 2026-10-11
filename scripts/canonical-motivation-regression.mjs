@@ -35,6 +35,27 @@ review.background = 'Applicant-supplied test background.';
 review.assertions = Object.fromEntries(Object.keys(engine.MASTER_ASSERTIONS).map(key => [key, true]));
 assert.deepEqual(engine.motivationReleaseIssues(sources, review), []);
 assert.deepEqual(review.evidenceIds, ['dedicated', 'id-proof', 'membership']);
+const oldEvidenceReview = { ...review, evidenceIds: ['id-proof'] };
+assert.deepEqual(engine.resolvedMotivationEvidenceIds(sources, oldEvidenceReview), ['dedicated', 'id-proof', 'membership']);
+assert.deepEqual(oldEvidenceReview.evidenceIds, ['id-proof'], 'saved historical review is not mutated');
+assert.ok(!engine.motivationReleaseIssues(sources, oldEvidenceReview).some(issue => /dedicated-status and membership/.test(issue)));
+const expiredWithEvidence = structuredClone(sources);
+expiredWithEvidence.competency.expiry_date = '2025-06-22';
+const remainingIssues = engine.motivationReleaseIssues(expiredWithEvidence, oldEvidenceReview);
+assert.ok(remainingIssues.includes('A verified current competency is required.'));
+assert.ok(!remainingIssues.some(issue => /dedicated-status and membership/.test(issue)));
+for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
+  for (const change of ['missing', 'unverified', 'expired', 'foreign']) {
+    const s = structuredClone(sources);
+    const document = s.documents.find(d => d.document_type === type);
+    if (change === 'missing') s.documents = s.documents.filter(d => d.id !== document.id);
+    if (change === 'unverified') document.is_verified = false;
+    if (change === 'expired') document.expiry_date = '2025-06-22';
+    if (change === 'foreign') document.client_id = 'foreign';
+    s.documents.push(evidence('good-standing-extra', 'GOOD_STANDING'));
+    assert.ok(engine.motivationReleaseIssues(s, oldEvidenceReview).some(issue => /dedicated-status and membership/.test(issue)), `${type} ${change} cannot be replaced by good standing`);
+  }
+}
 const reusableIdSources = structuredClone(sources);
 reusableIdSources.documents.find(d => d.id === 'id-proof').application_case_id = 'previous-application';
 assert.ok(engine.applicableMotivationEvidence(reusableIdSources).some(d => d.id === 'id-proof'), 'verified client identity remains reusable across applications');
@@ -225,6 +246,11 @@ const service = load('src/services/motivationService.ts');
 const readinessService = loader({ '../lib/supabase': { supabase: db }, './motivationService': service })('src/services/applicationReadinessService.ts');
 const motivationRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.documentType === 'MOTIVATION');
 const competencyRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.key === 'COMPETENCY_CERTIFICATE');
+const savedDraftDocument = evidence('saved-draft-selection', 'MOTIVATION', { is_generated: true, version_number: 100, metadata: { motivationDraft: structuredClone(oldEvidenceReview) } });
+tables.documents.push(savedDraftDocument);
+assert.deepEqual((await service.getMotivationWorkspace(identity)).review.evidenceIds, ['dedicated', 'id-proof', 'membership'], 'existing saved draft consumes newly available required certificates');
+assert.deepEqual(savedDraftDocument.metadata.motivationDraft.evidenceIds, ['id-proof'], 'loading does not rewrite history');
+tables.documents = tables.documents.filter(d => d.id !== savedDraftDocument.id);
 tables.documents.push(evidence('good-standing', 'GOOD_STANDING', { firearm_id: 'firearm' }));
 for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
   const document = tables.documents.find(d => d.document_type === type);
@@ -244,7 +270,7 @@ for (const type of ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE']) {
     const eligible = engine.applicableMotivationEvidence(s).some(d => d.id === document.id);
     assert.equal(eligible, verified && validity === 'SATISFIED');
     const r = { ...review, evidenceIds: review.evidenceIds.filter(id => id !== document.id) };
-    assert.ok(engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)), 'presence never silently selects evidence');
+    assert.equal(engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)), !eligible, 'required Section 16 certificates are automatically recognised only when eligible');
     if (eligible) {
       r.evidenceIds.push(document.id);
       assert.ok(!engine.motivationReleaseIssues(s, r).some(issue => /dedicated-status and membership/.test(issue)));

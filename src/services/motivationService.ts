@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { generatedDocumentPrivacy, registerGeneratedDocument } from './generatedApplicationDocumentService';
 import { renderDocxAsPdf, renderCanonicalMotivationAsPdf } from '../engines/docxPdfRenderer';
-import { applicableMotivationEvidence, defaultMotivationReview, motivationAnnexures, motivationReleaseIssues, motivationSourceSnapshot, populateCanonicalMotivation } from '../engines/canonicalMotivationEngine';
+import { applicableMotivationEvidence, defaultMotivationReview, motivationAnnexures, motivationReleaseIssues, motivationSourceSnapshot, populateCanonicalMotivation, resolvedMotivationEvidenceIds } from '../engines/canonicalMotivationEngine';
 import { currentMotivation, latestMotivation, isCanonicalMotivation, motivationState, MOTIVATION_MAPPING_VERSION, CANONICAL_MOTIVATION_HASH } from '../utils/motivationGeneratedState';
 import { resolveReusableCompetency } from '../utils/reusableCompetency';
 import type { MotivationReview, MotivationSources } from '../types/motivation';
@@ -65,7 +65,9 @@ export function validateMotivationReview(review: MotivationReview): void {
 export async function getMotivationWorkspace(identity: MotivationIdentity) {
   const sources = await loadMotivationSources(identity);
   const current = currentMotivation(sources.documents, identity.applicationCaseId);
-  const review = (current?.metadata.motivationDraft ?? current?.metadata.motivationReview ?? defaultMotivationReview(sources)) as MotivationReview;
+  const savedReview = (current?.metadata.motivationDraft ?? current?.metadata.motivationReview ?? defaultMotivationReview(sources)) as MotivationReview;
+  validateMotivationReview(savedReview);
+  const review = { ...savedReview, evidenceIds: resolvedMotivationEvidenceIds(sources, savedReview) };
   validateMotivationReview(review);
   let snapshot = '', issues: string[] = [];
   try { snapshot = motivationSourceSnapshot(sources, review); issues = motivationReleaseIssues(sources, review); }
@@ -94,6 +96,7 @@ async function supportingBytes(d: DocumentRecord): Promise<Uint8Array> {
 export async function generateMotivation(identity: MotivationIdentity, review: MotivationReview): Promise<DocumentRecord> {
   validateMotivationReview(review);
   const sources = await loadMotivationSources(identity);
+  review = { ...review, evidenceIds: resolvedMotivationEvidenceIds(sources, review) };
   const previous = latestMotivation(sources.documents, identity.applicationCaseId);
   const snapshot = motivationSourceSnapshot(sources, review);
   const response = await fetch('/templates/LicenceGuard-Master-Motivation-Canonical.docx');
