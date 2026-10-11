@@ -44,37 +44,48 @@ function subjectType(title, content, fields) {
 function relevanceScore(source, fields, group) {
   const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const title = normalize(source.title), content = normalize(source.summary);
-  const text = `${title} ${content}`;
+  // Evaluate bounded prose passages, not the union of unrelated menu labels.
+  // Titles rank qualifying excerpts but cannot establish substantive relevance.
+  const passages = source.summary.split(/[.!?;\n|]+/).map(normalize).filter(Boolean);
   const contains = (haystack, value) => Boolean(value && (` ${haystack} `).includes(` ${normalize(value)} `));
   const category = /shotgun/i.test(fields.firearmType) ? 'shotgun'
     : /rifle/i.test(fields.firearmType) ? 'rifle'
       : /pistol|revolver|handgun/i.test(fields.firearmType) ? 'handgun' : normalize(fields.firearmType);
-  const categoryMatch = contains(text, category) || (category === 'handgun' && /\b(pistol|revolver)\b/.test(text));
-  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel);
-  const gauge = /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
+  const categoryMatch = text => contains(text, category) || contains(text, `${category}s`) || (category === 'handgun' && /\b(pistols?|revolvers?)\b/.test(text));
+  const gaugeMatch = text => /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
     ? /\b12 (?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
-  const navigation = (text.match(/\b(home|contact us|login|log in|sign up|privacy policy|cookie policy|site map|menu|about us)\b/g) ?? []).length;
-  // Prefer no lead to an excerpt dominated by scraped navigation, even when
-  // its title carries search keywords. A full article can be reviewed separately.
-  if (navigation >= 3) return 0;
+  const wrongCategory = text => category === 'shotgun' && /\b(rifles?|pistols?|handguns?)\b/.test(text) && !categoryMatch(text);
+  if (wrongCategory(title)) return 0;
+  // A factual/rules/use relationship and at least eight words are required in
+  // the same passage as the subject. Keyword lists alone are not source evidence.
+  const prose = passages.filter(text => text.split(' ').length >= 8
+    && /\b(is|are|was|were|has|have|uses?|used|using|requires?|provides?|designed|manufactured|produced|features?|includes?|permits?|allows?|must|should|can)\b/.test(text)
+    && !wrongCategory(text));
+  const substantive = prose.filter(text => {
+    if (!categoryMatch(text)) return false;
+    if (group === 0) return (contains(text, fields.firearmMake) || contains(text, fields.firearmModel))
+      && /\b(specifications?|technical|barrels?|chokes?|action|production|history|manufactured|design|sporting|hunting)\b/.test(text);
+    const discipline = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
+    const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`);
+    return ((discipline.length ? discipline.some(value => contains(text, value)) : contains(text, fields.purpose)) || (hunting && /\bhunting\b/.test(text)))
+      && /\b(targets?|clays?|competition|rules?|equipment|barrels?|chokes?|game|hunting|sporting)\b/.test(text);
+  });
+  // Reject excerpts dominated by labels/navigation even if one passage qualifies.
+  const usefulWords = substantive.reduce((sum, text) => sum + text.split(' ').length, 0);
+  if (!substantive.length || usefulWords / Math.max(1, content.split(' ').length) < 0.5) return 0;
+  const text = substantive.join(' ');
+  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel), gauge = gaugeMatch(text);
   if (group === 0) {
-    const technical = /\b(manufacturer|specifications?|technical|barrel|chokes?|action|production|history|manufactured|design|sporting suitability)\b/.test(text);
     const titleIdentity = contains(title, fields.firearmMake) || contains(title, fields.firearmModel) || contains(title, category);
-    if (!technical || !categoryMatch || !(make || model || gauge)) return 0;
-    // A matching make in a rifle/pistol article does not identify this shotgun.
-    if (category === 'shotgun' && /\b(rifle|pistol|handgun)\b/.test(title) && !contains(title, 'shotgun')) return 0;
     return 8 + Number(make) * 4 + Number(model) * 6 + Number(gauge) * 3
-      + Number(titleIdentity) * 5 - navigation * 3;
+      + Number(titleIdentity) * 5;
   }
   const discipline = contains(text, fields.discipline);
   const purpose = contains(text, fields.purpose);
-  const sporting = /\b(rules?|targets?|clays?|competition|sporting|equipment|range|sport|shooting)\b/.test(text);
-  if (!sporting || (fields.discipline ? !discipline : !(purpose && categoryMatch))) return 0;
   const titleDiscipline = contains(title, fields.discipline);
-  if (category === 'shotgun' && /\b(rifle|pistol|handgun|hunting)\b/.test(title) && !titleDiscipline && !contains(title, 'shotgun')) return 0;
-  return 8 + Number(titleDiscipline) * 6 + Number(categoryMatch) * 4
+  return 8 + Number(titleDiscipline) * 6 + Number(discipline) * 3 + Number(categoryMatch(text)) * 4
     + Number(purpose) * 2 + Number(contains(text, `Section ${fields.licenceSection}`))
-    + Number(/\.za(?:\/|$)/i.test(source.url)) - navigation * 3;
+    + Number(/\.za(?:\/|$)/i.test(source.url));
 }
 
 function consumeRequest(userId) {

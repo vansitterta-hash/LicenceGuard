@@ -41,8 +41,8 @@ try {
         json: async () => ({
           usage: { credits: 1 },
           results: resultOverrides?.[JSON.parse(options.body).country ? 1 : 0] ?? [
-            { id: 'result-1', title: 'CZ 12 gauge shotgun specifications and skeet rules', url: 'https://example.test/firearm', content: 'Manufacturer technical specifications for the CZ shotgun and skeet sporting use.', published_date: '2026-08-01' },
-            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: JSON.parse(options.body).country ? 'Skeet shotgun competition rules' : '12 gauge shotgun technical specifications', url: `https://example.test/${JSON.parse(options.body).country ? 'sport' : 'technical'}/${i}`, content: 'Shotgun specifications and skeet competition context.' })),
+            { id: 'result-1', title: 'CZ 12 gauge shotgun specifications and skeet rules', url: 'https://example.test/firearm', content: 'The CZ 12 gauge shotgun has interchangeable chokes for skeet sporting use.', published_date: '2026-08-01' },
+            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: JSON.parse(options.body).country ? 'Skeet shotgun competition rules' : 'CZ 12 gauge shotgun technical specifications', url: `https://example.test/${JSON.parse(options.body).country ? 'sport' : 'technical'}/${i}`, content: 'The CZ 12 gauge shotgun uses interchangeable chokes for skeet competition targets.' })),
             { id: 'bad-url', title: 'Ignored scheme', url: 'javascript:alert(1)', content: 'Invalid URL result.' },
             { id: 'empty', title: 'Missing content', url: 'https://example.test/empty', content: '' },
           ],
@@ -124,11 +124,11 @@ try {
   const wrongCategory = publication('wrong-category', 'CZ rifle history', 'Manufacturer specifications for CZ rifles, not a shotgun guide.');
   resultOverrides = [
     [navigation, association, wrongCategory,
-      publication('weak-firearm', '12 gauge shotgun context', 'Technical characteristics of 12 gauge shotguns.'),
-      publication('strong-firearm', 'CZ 12 gauge shotgun specifications', 'Manufacturer information, barrel and choke specifications, CZ shotgun production history.')],
+      publication('weak-firearm', 'Shotgun context', 'The CZ shotgun has interchangeable chokes and documented technical characteristics for sporting use.'),
+      publication('strong-firearm', 'CZ 12 gauge shotgun specifications', 'The CZ 12 gauge shotgun has manufacturer barrel and choke specifications and documented production history.')],
     [association, navigation, publication('wrong-discipline', 'Hunting rifle association', 'Rifle hunting competitions and dedicated membership.'),
       publication('weak-purpose', 'Club newsletter', 'Skeet shooting competition uses a shotgun on the range.'),
-      publication('strong-purpose', 'Skeet shotgun competition rules', 'Skeet targets, equipment rules and shotgun sporting suitability in South Africa.')],
+      publication('strong-purpose', 'Skeet shotgun competition rules', 'Skeet competition rules require a shotgun to engage crossing clay targets with specified equipment.')],
   ];
   const focused = createResponse();
   const caseBody = { licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } };
@@ -145,6 +145,35 @@ try {
   assert.equal(insufficient.body.sourceCount, 0);
   assert.equal(insufficient.body.providerStatus, 'REQUIRES_EXTERNAL_PROVIDER');
   assert.match(insufficient.body.warnings.join(' '), /No relevant firearm-specific.*No relevant application-purpose/s);
+  // Reconstructed failure characteristics reported in physical testing, not
+  // verbatim provider excerpts (which were not supplied). Mixed menu terms must
+  // not establish relevance by leaking across unrelated passages.
+  const physicalFailures = [
+    publication('rifle-association', 'SA Hunting Rifle Shooting Association', 'The association provides rifle competition rules for dedicated hunters. Shotgun Skeet Hunting Membership Events'),
+    publication('dedicated-status', 'SA Hunters Dedicated Sport Shooter Status', 'Dedicated sport shooter status requires annual activity reports and membership. Skeet Shotgun Hunting Competitions'),
+    publication('firearm-help', 'Firearm help and dedicated status', 'Our firearm help service provides licensing assistance for Section 16 applicants. Skeet Shotgun Hunting Equipment'),
+    publication('hunting-menu', 'Hunting and shotgun Skeet information', 'Membership Events Training Bookings News Downloads Branches Competitions Rifle Pistol Shotgun Skeet Hunting Conservation Gallery Sponsors Shop Calendar Resources. Skeet competition requires shotguns to engage crossing clay targets.'),
+    publication('other-category', 'CZ rifle technical specifications', 'The CZ rifle has a technical action designed for hunting and sporting competition. Shotgun Skeet'),
+  ];
+  const natshoot = publication('natshoot', 'Natshoot shotgun Skeet competition', 'Skeet rules require shotguns to engage crossing clay targets from specified stations with approved equipment. Competitors must follow shotgun safety rules on the range.' );
+  const hunting = publication('shotgun-hunting', '12 bore shotgun hunting use', 'A 12 bore shotgun can be used for hunting game birds with suitable ammunition and chokes. Hunting shotguns should use patterns appropriate to the game and distance.');
+  const cz = publication('cz-shotgun', 'CZ 12 bore shotgun technical characteristics', 'The CZ 12 bore shotgun has documented barrel specifications and interchangeable chokes for sporting and hunting use.');
+  const dualPurpose = { ...caseBody, discipline: 'Skeet AND hunting' };
+  resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, hunting]];
+  const physical = createResponse(); await handler(request(dualPurpose), physical);
+  assert.equal(physical.statusCode, 200);
+  assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url]));
+  assert.equal(physical.body.sources[0].url, cz.url, 'qualified firearm discovery retains its balanced slot');
+  assert.ok(physical.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && !s.reviewed && !s.approved));
+  assert.equal(Object.hasOwn(physical.body, 'claims'), false);
+  resultOverrides = [physicalFailures, [...physicalFailures, natshoot, hunting]];
+  const unidentified = createResponse(); await handler(request(dualPurpose), unidentified);
+  assert.equal(unidentified.body.sourceCount, 2, 'no guessed model or filler when firearm evidence is unavailable');
+  assert.match(unidentified.body.warnings.join(' '), /No relevant firearm-specific/);
+  assert.equal(unidentified.body.firearm.model, null);
+  resultOverrides = [physicalFailures, physicalFailures];
+  const allPoor = createResponse(); await handler(request(dualPurpose), allPoor);
+  assert.equal(allPoor.body.sourceCount, 0, 'zero qualifying sources is valid');
   console.log('Live research API auth, privacy filtering, server-only key, bounded search, and source mapping passed.');
 } finally {
   globalThis.fetch = previousFetch;
