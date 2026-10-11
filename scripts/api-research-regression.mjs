@@ -5,6 +5,18 @@ import handler from '../api/application-research.js';
 
 const apiCode = readFileSync('api/application-research.js', 'utf8');
 const validateConfiguration = new Function(apiCode.slice(0, apiCode.indexOf('function subjectType')) + '; return validResearchInput;')();
+const scoreSource = new Function(apiCode.slice(0, apiCode.indexOf('function consumeRequest')) + '; return relevanceScore;')();
+const unknownFields = validateConfiguration({ purpose: 'Dedicated hunting and sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } });
+const scoredSource = (title, summary, publisher = 'example.test') => ({ title, summary, publisher });
+for (const group of [0, 1, 2]) {
+  assert.ok(scoreSource(scoredSource('CZ All Terrain 1012 G2 shotgun', 'This CZ 12 gauge shotgun has a semi-automatic action and barrel specifications for sporting hunting use.'), unknownFields, group) < 14, 'unknown model must reject another named CZ model in every search');
+  assert.ok(scoreSource(scoredSource('CZ shotgun catalogue', 'CZ shotguns include barrels, chokes, technical specifications and sporting hunting suitability. Menu shop cart subscribe newsletter dealer locator.'), unknownFields, group) < 14, 'catalogue keywords cannot establish a proposition');
+  assert.ok(scoreSource(scoredSource('Shotgun technical guide', 'Model: All Terrain 1012 G2. CZ 12 gauge shotgun barrel specifications.'), unknownFields, group) < 14);
+}
+assert.ok(scoreSource(scoredSource('Skeet equipment rules', 'Skeet competition rules require shotguns to engage crossing clay targets with approved equipment.', 'issf-sports.org'), unknownFields, 1) >= 14, 'discipline source needs no CZ mention');
+assert.ok(scoreSource(scoredSource('12 gauge shotgun hunting safety', 'A 12 gauge shotgun can be used for hunting with appropriate ammunition and safe distances.'), unknownFields, 2) >= 14);
+assert.equal(unknownFields.firearmModel, '');
+assert.equal(unknownFields.firearmConfiguration, '');
 const { FIREARM_CONFIGURATIONS, FIREARM_CONFIGURATION_TYPES } = loader()('src/utils/firearmConfiguration.ts');
 for (const [type, permitted] of Object.entries(FIREARM_CONFIGURATION_TYPES)) {
   const body = configuration => ({ firearm: { firearmType: type, calibre: 'Test calibre', firearmConfiguration: configuration, firearmConfigurationOther: configuration === 'OTHER' ? 'Recorded compatible description' : null } });
@@ -110,7 +122,7 @@ try {
   assert.match(payload.query, /CZ.*12 BR SHOTGUN.*SHOTGUN.*12 bore 12 gauge/);
   assert.doesNotMatch(payload.query, /skeet|Section 16|Sport Association|Dedicated sport|1165306|Beretta|1301|South Africa/);
   assert.equal(Object.hasOwn(payload, 'country'), false);
-  assert.match(purposePayload.query, /Section 16.*FIREARM_LICENCE_FIRST_APPLICATION.*Dedicated sport shooting.*skeet.*Sport Association.*SHOTGUN/);
+  assert.match(purposePayload.query, /Section 16.*FIREARM_LICENCE_FIRST_APPLICATION.*skeet.*Sport Association.*SHOTGUN.*12 BR SHOTGUN/);
   assert.equal(purposePayload.country, 'south africa');
   assert.doesNotMatch(purposePayload.query, /1165306/);
   assert.equal(response.body.firearm.model, null);
@@ -152,8 +164,8 @@ try {
   const caseBody = { licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } };
   await handler(request(caseBody), focused);
   assert.equal(focused.statusCode, 200);
-  assert.equal(focused.body.sourceCount, 4, 'irrelevant material never fills the limit');
-  assert.deepEqual(focused.body.sources.map(s => s.url), ['strong-firearm', 'strong-purpose', 'weak-firearm', 'weak-purpose'].map(id => `https://example.test/${id}`));
+  assert.equal(focused.body.sourceCount, 3, 'irrelevant material and newsletters never fill the limit');
+  assert.deepEqual(focused.body.sources.map(s => s.url), ['strong-firearm', 'strong-purpose', 'weak-firearm'].map(id => `https://example.test/${id}`));
   assert.match(focused.body.warnings.join(' '), /Insufficient relevant sources/);
   assert.ok(focused.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && !s.reviewed && !s.approved));
   assert.equal(Object.hasOwn(focused.body, 'claims'), false);
@@ -183,6 +195,10 @@ try {
   const dualPurpose = { ...caseBody, discipline: 'Skeet AND hunting' };
   resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, hunting, gaugeSkeet, shortHunting]];
   const physical = createResponse(); await handler(request(dualPurpose), physical);
+  const huntingQuery = JSON.parse(providerRequests.at(-1).options.body).query;
+  assert.doesNotMatch(JSON.parse(providerRequests.at(-2).options.body).query, /hunting/i, 'Skeet and hunting searches are independent');
+  assert.match(huntingQuery, /SHOTGUN.*12 BR SHOTGUN.*hunting suitability/);
+  assert.doesNotMatch(huntingQuery, /quarry|game birds|frequency|experience|1012|semi.automatic/i);
   assert.equal(physical.statusCode, 200);
   assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url, gaugeSkeet.url, shortHunting.url]));
   assert.equal(physical.body.sourceCount, 5, 'short descriptive excerpts qualify without every context term or a prescribed verb');

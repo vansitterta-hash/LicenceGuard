@@ -74,6 +74,16 @@ function relevanceScore(source, fields, group) {
   const gaugeMatch = text => /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
     ? /\b12\s*(?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
   const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel);
+  // A named model is not evidence for an unidentified firearm. Apply this to
+  // every discovery group so a purpose search cannot bypass identity checks.
+  const labelledModel = source.summary.match(/\bmodel\s*:\s*([^.;\n|]+)/i);
+  const modelTitle = make && /\b(?:\d{3,}[a-z]*|[a-z]+\d+|g\d+)\b/i.test(title);
+  if ((labelledModel && (!fields.firearmModel || !contains(normalize(labelledModel[1]), fields.firearmModel)))
+    || (modelTitle && (!fields.firearmModel || !contains(title, fields.firearmModel)))) return -100;
+  if (/\b(catalogue|catalog|newsletter|dealer locator|find a dealer)\b/i.test(title)) return -100;
+  if (make && !fields.firearmModel && !fields.firearmConfiguration
+    && /\b(semi automatic|over and under|over under|side by side|pump action)\b/.test(text)) return -100;
+  if (/\b(best in class|ultimate|unmatched|buy now|shop now)\b/.test(content)) return -100;
   const categoryFound = categoryMatch(text), gauge = gaugeMatch(text);
   const technical = /\b(manufacturer|specifications?|technical|barrels?|chokes?|action|production|history|manufactured|design)\b/.test(content);
   const disciplines = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
@@ -115,6 +125,10 @@ function relevanceScore(source, fields, group) {
   if ((passages.length >= 4 && shortFragments / passages.length >= 0.6)
     || (words >= 25 && proseWords / words < 0.4 && !/\b\d+(?:\.\d+)?\s*(?:mm|cm|inch|inches|kg|lbs)\b/i.test(source.summary))
     || /\b(home|menu)\b.*\b(contact|login|log in|privacy)\b/i.test(content)) score -= 24;
+  const navigationTerms = content.match(/\b(menu|catalogue|catalog|newsletter|subscribe|dealer locator|privacy|login|shop|cart|downloads|contact)\b/g) ?? [];
+  if (navigationTerms.length >= 3 && navigationTerms.length * 5 >= words) return -100;
+  // Prefer attributable technical/rules material, without approving its claims.
+  if (/\.(?:gov|org)(?:\.[a-z]{2})?$/i.test(source.publisher ?? '') && /\b(rules|technical|equipment|safety)\b/.test(content)) score += 3;
   return score;
 }
 
@@ -173,15 +187,24 @@ export default async function handler(request, response) {
   const purposeQuery = [
     fields.licenceSection ? `Section ${fields.licenceSection}` : '',
     fields.applicationType,
-    fields.purpose,
-    fields.discipline.trim().toLowerCase(),
+    // Keep a saved discipline search focused; hunting gets its own search below.
+    fields.discipline ? '' : fields.purpose,
+    fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(value => value && value !== 'hunting').join(' '),
     fields.association,
     fields.firearmType,
-    'sporting discipline firearm category suitability competition rules dedicated sport official sources South Africa',
+    fields.calibre, shotgunAlias,
+    'discipline equipment competition rules technical governing body official sources',
   ].filter(Boolean).join(' ').slice(0, 700);
 
   try {
     const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery' }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery', country: 'south africa' }];
+    if (/\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`)) {
+      // General suitability only: no quarry, frequency or personal circumstances
+      // are introduced when those facts are absent from the saved context.
+      searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias,
+        'hunting suitability ammunition safety technical guidance authoritative sources'].filter(Boolean).join(' '),
+      subject: 'Saved hunting-purpose discovery', country: 'south africa' });
+    }
     const responses = await Promise.all(searches.map(search => fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -239,7 +262,7 @@ export default async function handler(request, response) {
     // Alternate subjects within the existing six-source budget. Skip duplicate
     // URLs without losing remaining unique results from either search.
     const sources = [], seen = new Set();
-    const positions = [0, 0];
+    const positions = groups.map(() => 0);
     while (sources.length < 6 && groups.some((group, i) => positions[i] < group.length)) {
       for (let i = 0; i < groups.length && sources.length < 6; i++) {
         while (positions[i] < groups[i].length) {
