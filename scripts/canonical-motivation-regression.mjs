@@ -30,10 +30,18 @@ const evidence = (id, type, extra = {}) => ({ ...privacy, id, client_id: 'client
 const documents = [evidence('id-proof', 'ID_COPY'), evidence('membership', 'MEMBERSHIP_CERTIFICATE'), evidence('dedicated', 'DEDICATED_STATUS'), evidence('unverified', 'SUPPORTING_DOCUMENT', { is_verified: false }), evidence('official-form', 'FIREARM_LICENCE_APPLICATION_FORM'), evidence('foreign', 'SUPPORTING_DOCUMENT', { firearm_id: 'different-firearm' }), evidence('research', 'SUPPORTING_RESEARCH', { firearm_id: 'firearm', is_verified: false, metadata: { researchSources: [{ id: 'source', title: 'Test manufacturer specification', publisher: 'Test manufacturer', url: 'https://example.test/cz', summary: 'A source-supported test characteristic.' }] } })];
 const sources = { client, application, firearm, competency, documents };
 const review = engine.defaultMotivationReview(sources);
-review.narrative = 'I participate in trap shooting at my local range and intend to use this shotgun for that discipline. Its suitability for my planned sporting use is explained here using applicant-supplied test facts only.';
+review.narrative = 'Intended use: I intend to use this firearm for trap shooting at my local range, practising the discipline I have recorded and developing my own sporting participation.\nFirearm suitability: The recorded CZ shotgun in 12 bore is the firearm I intend to use for my stated trap activity; I describe its suitability here using applicant-confirmed test facts only, without inferring an unknown configuration.\nPractical need: My practical sporting need is to have a firearm available for the trap activity described above, rather than relying on availability of borrowed equipment for my intended use.';
 review.background = 'Applicant-supplied test background.';
 review.assertions = Object.fromEntries(Object.keys(engine.MASTER_ASSERTIONS).map(key => [key, true]));
 assert.deepEqual(engine.motivationReleaseIssues(sources, review), []);
+for (const narrative of ['I need this shotgun for Skeet and hunting and it is suitable for both', 'I need this shotgun for trap shooting and it is appropriate and well suited for my sporting purposes at a range.']) {
+  assert.ok(engine.motivationReleaseIssues(sources, { ...review, narrative }).some(i => /Develop the Section 16 narrative/.test(i)));
+}
+const sportingAndHunting = structuredClone(sources);
+sportingAndHunting.application.sport_discipline = 'Skeet and hunting';
+const developedBoth = { ...review, narrative: review.narrative.replaceAll('trap', 'Skeet and hunting') };
+assert.ok(!engine.motivationReleaseIssues(sportingAndHunting, developedBoth).some(i => /Develop the Section 16 narrative/.test(i)));
+assert.ok(engine.motivationReleaseIssues(sportingAndHunting, review).some(i => /Develop the Section 16 narrative/.test(i)), 'omitted saved hunting/discipline use remains incomplete');
 assert.deepEqual(review.evidenceIds, ['dedicated', 'id-proof', 'membership']);
 const oldEvidenceReview = { ...review, evidenceIds: ['id-proof'] };
 assert.deepEqual(engine.resolvedMotivationEvidenceIds(sources, oldEvidenceReview), ['dedicated', 'id-proof', 'membership']);
@@ -133,6 +141,10 @@ const optional = structuredClone(sources); optional.firearm.model = null; option
 const optionalText = await textOf(await engine.populateCanonicalMotivation(master, optional, review, '2026-10-10'));
 assert.doesNotMatch(optionalText, /MODEL NOT RECORDED|Model:|Cato Ridge, Cato Ridge/);
 assert.deepEqual(engine.motivationReleaseIssues(optional, review), []);
+const unverifiedCompetency = structuredClone(sources);
+unverifiedCompetency.competency.verified = false;
+assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, unverifiedCompetency, review, '2026-10-10')), /VERIFIED COMPETENCY REQUIRED/);
+assert.ok(engine.motivationReleaseIssues(unverifiedCompetency, review).includes('A verified current competency is required.'));
 const placeholderSource = structuredClone(sources); placeholderSource.firearm.model = '[MODEL NOT RECORDED]';
 assert.ok(engine.motivationReleaseIssues(placeholderSource, review).some(i => /placeholder/.test(i)));
 const renderer = loader()('src/engines/docxPdfRenderer.ts');
@@ -206,6 +218,19 @@ assert.equal(engine.motivationResearchRuns({ ...rerunSources, documents: [...rer
 const wrongDiscipline = structuredClone(newRun); wrongDiscipline.metadata.researchContext.discipline = 'Skeet';
 assert.equal(engine.motivationResearchRuns({ ...rerunSources, documents: [...rerunSources.documents.slice(0, -1), wrongDiscipline] }).current.document.id, 'research');
 assert.match(await textOf(await engine.populateCanonicalMotivation(master, sources, researched, '2026-10-10')), /source-supported test characteristic.*Test manufacturer specification/s);
+const referencesOutput = await engine.populateCanonicalMotivation(master, sources, researched, '2026-10-10');
+const referencesText = await textOf(referencesOutput);
+assert.match(referencesText, /REFERENCES AND SUPPORTING EVIDENCE/);
+assert.match(referencesText, /Test manufacturer specification; Test manufacturer; date not recorded; https:\/\/example.test\/cz/);
+const referencePdf = await PDFDocument.load(await renderer.renderCanonicalMotivationAsPdf(referencesOutput));
+const referencePagination = JSON.parse(referencePdf.getSubject());
+assert.equal(referencePagination.indexPages.lg_motivation_356, referencePagination.sectionPages.lg_motivation_356);
+assert.ok(referencePagination.sectionPages.lg_motivation_356 > 0);
+assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, sources, review, '2026-10-10')), /REFERENCES AND SUPPORTING EVIDENCE|Test manufacturer specification/);
+const otherModel = structuredClone(sources);
+otherModel.firearm.model = null;
+otherModel.documents.find(d => d.id === 'research').metadata.researchSources = [{ id: 'other-model', title: 'CZ All Terrain 1012 G2', url: 'https://example.test/other-model', summary: 'This other model is an over-and-under example.' }];
+assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, otherModel, review, '2026-10-10')), /All Terrain|1012|over-and-under|Model:/);
 assert.doesNotMatch(await textOf(await engine.populateCanonicalMotivation(master, sources, { ...researched, claims: [{ ...claim, reviewed: false }] }, '2026-10-10')), /source-supported test characteristic/);
 assert.throws(() => engine.reviewedMotivationClaims(sources, { ...review, claims: [{ ...claim, sourceId: 'invented' }] }), /Research source/);
 assert.throws(() => engine.reviewedMotivationClaims(sources, { ...review, claims: [{ ...claim, section: 'Rarity / Scarcity' }] }), /non-Section-17/);
@@ -223,6 +248,35 @@ const collectorText = await textOf(await engine.populateCanonicalMotivation(mast
 assert.match(collectorText, /Independent association-issued approval: Annexure/);
 assert.match(collectorText, /Documented test theme/); assert.match(collectorText, /Historical Value/);
 assert.doesNotMatch(collectorText, /Rarity \/ Scarcity|Investment Significance|Annexure [A-Z]: dedicated/);
+for (const section of ['13', '15', '16', '17']) {
+  const s = structuredClone(section === '17' ? collectorSources : sources);
+  s.application.licence_section = section;
+  s.firearm.model = null;
+  let r = structuredClone(section === '17' ? collectorReview : researched);
+  if (section === '13') {
+    s.application.primary_purpose = 'Self-defence'; s.application.sport_discipline = null; s.application.sport_association = null;
+    r.narrative = 'Intended use: I intend this firearm for self-protection in the circumstances I have personally described for this test, without asserting an incident, specific threat or crime exposure that I have not supplied.\nFirearm suitability: The recorded CZ shotgun in 12 bore is the firearm whose suitability I explain for my intended defensive use using my confirmed facts, without inventing a model or configuration.\nPractical need: My practical need for protection concerns the circumstances I have stated here, and I distinguish those personal circumstances from general external crime context which does not prove a specific threat.';
+  }
+  if (section !== '16') {
+    s.documents = s.documents.filter(d => !['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(d.document_type));
+    r.evidenceIds = r.evidenceIds.filter(id => s.documents.some(d => d.id === id));
+  }
+  // Collector membership remains an independent collector requirement.
+  if (section === '17') r.collector.membership = 'Applicant-confirmed test standing';
+  const issues = engine.motivationReleaseIssues(s, r);
+  assert.ok(!issues.some(i => /Develop the Section|dedicated-status and membership/.test(i)), section);
+  if (section !== '17') assert.ok(engine.motivationReleaseIssues(s, { ...r, narrative: 'I need this firearm and it is suitable.' }).some(i => /Develop the Section/.test(i)), section);
+  const acceptedText = await textOf(await engine.populateCanonicalMotivation(master, s, r, '2026-10-10'));
+  assert.match(acceptedText, /REFERENCES AND SUPPORTING EVIDENCE/, section);
+  assert.match(acceptedText, /Test manufacturer specification/, section);
+  assert.doesNotMatch(acceptedText, /Model:|over-and-under|specific threat exists|crime incident occurred/, section);
+  for (const claims of [[], r.claims.map(c => ({ ...c, reviewed: false }))]) {
+    const noResearch = await textOf(await engine.populateCanonicalMotivation(master, s, { ...r, claims }, '2026-10-10'));
+    assert.doesNotMatch(noResearch, /REFERENCES AND SUPPORTING EVIDENCE|Test manufacturer specification|source-supported test characteristic/, section);
+  }
+  s.competency.expiry_date = '2025-06-22';
+  assert.ok(engine.motivationReleaseIssues(s, r).includes('A verified current competency is required.'), section);
+}
 const snapshot = engine.motivationSourceSnapshot(sources, review);
 for (const change of [s => { s.firearm.serial_number = 'changed'; }, s => { s.application.primary_purpose = 'changed'; }, s => { s.documents[0].storage_path = 'changed'; }, s => { s.client.first_name = 'changed'; }]) {
   const s = structuredClone(sources); change(s); assert.notEqual(engine.motivationSourceSnapshot(s, review), snapshot);
@@ -234,7 +288,7 @@ const storedFiles = new Map(); let currentUser = 'owner', seq = 0;
 // Explicit offline RLS grants model already-authorized legacy records. NULL
 // ownership alone never makes a row visible to the authenticated caller.
 const legacySourceGrants = new Set();
-const smallPdf = await PDFDocument.create(); smallPdf.addPage(); const pdfBytes = await smallPdf.save();
+const smallPdf = await PDFDocument.create(); smallPdf.addPage().drawText('Actual supporting evidence content'); const pdfBytes = await smallPdf.save();
 for (const d of documents) storedFiles.set(d.storage_path, pdfBytes);
 const db = {
   auth: { getSession: async () => ({ data: { session: { user: { id: currentUser } } }, error: null }) },
@@ -360,7 +414,17 @@ try {
   assert.equal(first.owner_user_id, 'owner'); assert.equal(first.record_scope, 'PRIVATE'); assert.equal(first.application_case_id, 'case'); assert.equal(first.firearm_id, 'firearm');
   assert.equal(first.is_verified, false); assert.equal(first.version_number, 1); assert.equal(first.metadata.motivationSourceSnapshot, snapshot);
   assert.doesNotMatch(await textOf(renderedDocx), /8x68S|Mauser|34853/);
-  assert.equal((await PDFDocument.load(storedFiles.get(first.storage_path))).getPageCount(), renderedPageCount + 6, 'paginated Motivation and 3 actual annexures with marker pages embedded');
+  const assembledFirst = await PDFDocument.load(storedFiles.get(first.storage_path));
+  assert.equal(assembledFirst.getPageCount(), renderedPageCount + 3, 'one content page per annexure, no label-only pages');
+  const finalPagination = JSON.parse(assembledFirst.getSubject());
+  assert.equal(finalPagination.pageCount, assembledFirst.getPageCount());
+  assert.equal(finalPagination.motivationPageCount, renderedPageCount);
+  assert.deepEqual(finalPagination.indexPages, finalPagination.sectionPages);
+  assert.deepEqual(finalPagination.annexurePages, { A: { start: renderedPageCount + 1, end: renderedPageCount + 1 }, B: { start: renderedPageCount + 2, end: renderedPageCount + 2 }, C: { start: renderedPageCount + 3, end: renderedPageCount + 3 } });
+  for (const page of assembledFirst.getPages().slice(renderedPageCount)) {
+    const content = Array.from({ length: page.node.Contents().size() }, (_, i) => inflateSync(assembledFirst.context.lookup(page.node.Contents().get(i)).getContents()).toString()).join('\n');
+    assert.match(content, /\bDo\b/, 'annexure page draws the actual embedded evidence, not just its label');
+  }
   await assert.rejects(service.confirmMotivation(identity, first.id), /Review and regenerate/);
   await service.markMotivationReviewed(identity, first.id); await service.confirmMotivation(identity, first.id);
   await service.assertCurrentMotivationReleased(identity, first.id);
@@ -371,7 +435,7 @@ try {
   assert.equal((await motivationRequirement()).state, 'PENDING_GENERATION');
   await assert.rejects(service.assertCurrentMotivationReleased(identity, first.id), /current Motivation/);
   await assert.rejects(service.confirmMotivation(identity, first.id), /Review and regenerate/);
-  const corrected = { ...review, narrative: 'Corrected applicant explanation. ' + review.narrative };
+  const corrected = { ...review, narrative: review.narrative + ' Corrected applicant explanation.' };
   const second = await service.generateMotivation(identity, corrected);
   assert.equal(second.version_number, 2); assert.equal(second.parent_document_id, first.id); assert.equal(second.is_verified, false);
   assert.ok(tables.documents.some(d => d.id === first.id)); assert.ok(storedFiles.has(first.storage_path), 'history PDF retained');
@@ -429,6 +493,18 @@ try {
   assert.equal(fourth.version_number, 4); assert.equal(fourth.parent_document_id, third.id);
   assert.equal(fourth.metadata.motivationMappingVersion, 'CANONICAL_V2');
   assert.ok(storedFiles.has(third.storage_path), 'V1 bytes stay in history');
+  const standing = evidence('selected-standing', 'GOOD_STANDING');
+  tables.documents.push(standing); storedFiles.set(standing.storage_path, pdfBytes);
+  const selectedStanding = await service.generateMotivation(identity, { ...corrected, evidenceIds: [...corrected.evidenceIds, standing.id] });
+  assert.ok(selectedStanding.metadata.annexures.some(a => a.documentId === standing.id), 'explicitly selected Good-standing is assembled');
+  assert.equal((await PDFDocument.load(storedFiles.get(selectedStanding.storage_path))).getPageCount(), renderedPageCount + 4);
+  const expiredBeforeAssembly = tables.competencies[0].expiry_date;
+  tables.competencies[0].expiry_date = '2025-06-22';
+  const expiredOutput = await service.generateMotivation(identity, corrected);
+  assert.ok(expiredOutput.metadata.motivationReleaseIssues.includes('A verified current competency is required.'));
+  await service.markMotivationReviewed(identity, expiredOutput.id);
+  await assert.rejects(service.confirmMotivation(identity, expiredOutput.id), /verified current competency/);
+  tables.competencies[0].expiry_date = expiredBeforeAssembly;
   const unfinished = await service.generateMotivation(identity, { ...review, narrative: '[PERSONAL MOTIVATION REQUIRES CONFIRMATION]' });
   await service.markMotivationReviewed(identity, unfinished.id);
   await assert.rejects(service.confirmMotivation(identity, unfinished.id), /substantive personal motivation|placeholder/);

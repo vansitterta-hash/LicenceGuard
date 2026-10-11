@@ -106,21 +106,36 @@ export async function generateMotivation(identity: MotivationIdentity, review: M
   const pdf = await pdfLib.PDFDocument.load(await renderCanonicalMotivationAsPdf(docx));
   // Annexures are actually embedded, so a register never claims an absent attachment.
   const annexures = motivationAnnexures(sources, review);
+  const annexurePages: Record<string, { start: number; end: number }> = {};
+  const font = await pdf.embedFont(pdfLib.StandardFonts.Helvetica);
   for (const a of annexures) {
     const bytes = await supportingBytes(a.document);
-    const marker = pdf.addPage([595.28, 841.89]);
-    const font = await pdf.embedFont(pdfLib.StandardFonts.Helvetica);
-    marker.drawText(`Annexure ${a.letter}`, { x: 44, y: 790, size: 18, font });
+    const start = pdf.getPageCount() + 1;
     const mime = a.document.mime_type ?? '', file = a.document.file_name.toLowerCase();
     if (mime === 'application/pdf' || file.endsWith('.pdf') || file.endsWith('.docx')) {
       const attached = await pdfLib.PDFDocument.load(file.endsWith('.docx') ? await renderDocxAsPdf(bytes) : bytes);
       if (!attached.getPageCount()) throw new Error(`Empty annexure: ${a.document.document_name}`);
-      (await pdf.copyPages(attached, attached.getPageIndices())).forEach(page => pdf.addPage(page));
+      for (const sourcePage of attached.getPages()) {
+        const embedded = await pdf.embedPage(sourcePage);
+        const page = pdf.addPage([595.28, 841.89]);
+        const scale = Math.min(507.28 / embedded.width, 727.89 / embedded.height);
+        page.drawPage(embedded, { x: (595.28 - embedded.width * scale) / 2, y: 50, width: embedded.width * scale, height: embedded.height * scale });
+        page.drawText(`Annexure ${a.letter}`, { x: 44, y: 798, size: 12, font });
+      }
     } else if (mime === 'image/png' || mime === 'image/jpeg' || /\.(png|jpe?g)$/.test(file)) {
+      const marker = pdf.addPage([595.28, 841.89]);
+      marker.drawText(`Annexure ${a.letter}`, { x: 44, y: 798, size: 12, font });
       const image = mime === 'image/png' || file.endsWith('.png') ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
       const scale = Math.min(505 / image.width, 690 / image.height);
       marker.drawImage(image, { x: 44, y: 60, width: image.width * scale, height: image.height * scale });
     } else throw new Error(`Convert ${a.document.document_name} to a supported PDF, DOCX, PNG or JPEG before selecting it as an annexure.`);
+    annexurePages[a.letter] = { start, end: pdf.getPageCount() };
+  }
+  const pagination = JSON.parse(pdf.getSubject() ?? '{}');
+  pdf.setSubject(JSON.stringify({ ...pagination, motivationPageCount: pagination.pageCount, pageCount: pdf.getPageCount(), annexurePages }));
+  for (const [index, page] of pdf.getPages().entries()) {
+    page.drawRectangle({ x: 44, y: 24, width: 200, height: 16, color: pdfLib.rgb(1, 1, 1) });
+    page.drawText(`Page ${index + 1} of ${pdf.getPageCount()}`, { x: 44, y: 28, size: 9, font });
   }
   // Reject source edits or another generation during rendering; never confirm stale bytes.
   const latest = await loadMotivationSources(identity);

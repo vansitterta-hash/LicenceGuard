@@ -144,6 +144,25 @@ export function motivationReleaseIssues(s: MotivationSources, r: MotivationRevie
   if (s.application.licence_section === '17' && !/collect/i.test(s.application.primary_purpose ?? '')) issues.push('Confirm that the Section 17 purpose is private collection.');
   if (!r.background.trim()) issues.push('Confirm applicant background.');
   if (r.narrative.trim().split(/\s+/).length < 20 || hasMotivationPlaceholder(r.narrative)) issues.push('Provide a substantive personal motivation: actual participation/use, intended firearm use, suitability and relevant personal circumstances (at least 20 words; no placeholders).');
+  if (['13', '15', '16'].includes(s.application.licence_section ?? '')) {
+    const parts = ['Intended use', 'Firearm suitability', 'Practical need'].map(label => {
+      const match = r.narrative.match(new RegExp(`(?:^|\\n)${label}:\\s*([\\s\\S]*?)(?=\\n(?:Intended use|Firearm suitability|Practical need):|$)`, 'i'));
+      return match?.[1].trim() ?? '';
+    });
+    const developed = parts.every(text => text.split(/\s+/).filter(Boolean).length >= 20 && new Set(text.toLowerCase().match(/[a-z0-9]+/g)).size >= 12);
+    const defensive = s.application.licence_section === '13';
+    const disciplines = (defensive ? '' : s.application.sport_discipline ?? '').toLowerCase().split(/\s+(?:and|&)\s+|[,/]/).map(t => t.trim()).filter(Boolean);
+    const use = parts[0].toLowerCase(), suitability = parts[1].toLowerCase(), need = parts[2].toLowerCase();
+    const calibre = s.firearm.calibre.match(/\d+(?:[.,]\d+)?/)?.[0] ?? s.firearm.calibre.toLowerCase();
+    if (!developed || !/\b(?:i|my)\b/i.test(parts[0]) || disciplines.some(d => !use.includes(d))
+      || (/hunt/i.test(`${s.application.primary_purpose} ${s.application.sport_discipline}`) && !/hunt/i.test(use))
+      || !suitability.includes(s.firearm.make.toLowerCase()) || !suitability.includes(s.firearm.firearm_type.replaceAll('_', ' ').toLowerCase())
+      || !suitability.includes(calibre)
+      || !/\b(?:i|my)\b/i.test(parts[2]) || !(defensive ? /defen[cs]|protect|safety/i : /sport|hunt/i).test(need)
+      || (defensive && !/defen[cs]|protect|safety/i.test(use))) {
+      issues.push(`Develop the Section ${s.application.licence_section} narrative under Intended use:, Firearm suitability: and Practical need: (at least 20 words and 12 distinct words each). ${defensive ? 'Describe your actual self-protection circumstances and intended defensive use; external crime context is not proof of a personal threat.' : 'Address the saved disciplines/purposes.'} Explain the recorded make/type/calibre suitability and your practical need. Do not invent missing firearm or applicant facts.`);
+    }
+  }
   if (hasMotivationPlaceholder(stableMotivationJson(r))) issues.push('Replace unresolved placeholder text in the Motivation review before release.');
   for (const [key, a] of Object.entries(MASTER_ASSERTIONS)) if (r.assertions[key] !== true) issues.push(`Applicant confirmation required: ${a.label}`);
   const profile = s.client.saps271_declarations;
@@ -229,9 +248,12 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
   values[59] = (p[59].textContent ?? '').replace('LICENSES', 'LICENCES');
   values[183] = (p[183].textContent ?? '').replace('LICENSES', 'LICENCES');
   values[218] = values[218].replace('and has successfully', 'and have successfully');
+  // Missing verification remains a release issue, never customer-facing control text.
+  if (!s.competency?.verified) values[230] = values[230].replace(/\nCompetency:.*$/, '');
   for (const [i, text] of Object.entries(values)) set(Number(i), text);
   // The Motivation renderer resolves index cells against actual section bookmarks.
-  const sections = [[99, 194], [102, 207], [105, 214], [108, 236], [111, 239], [114, 243], [117, 257], ...(section === '17' ? [[120, 266], [123, 268], [126, 280], [129, 286], [132, 308], [135, 315], [138, 335], [141, 356], [144, 359]] : []), [150, 383], [147, 397]];
+  const hasReferences = ['13', '15', '16', '17'].includes(section ?? '') && claims.length > 0;
+  const sections = [[99, 194], [102, 207], [105, 214], [108, 236], [111, 239], [114, 243], [117, 257], ...(section === '17' ? [[120, 266], [123, 268], [126, 280], [129, 286], [132, 308], [135, 315], [138, 335], ...(hasReferences ? [[141, 356]] : []), [144, 359]] : hasReferences ? [[141, 356]] : []), [150, 383], [147, 397]];
   // The Master places the register before the conclusion in the body; reflect
   // that actual order in the index without rearranging applicant content.
   const conclusionRow = p[147].parentNode?.parentNode;
@@ -245,8 +267,9 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
   }
   let sectionNumber = 0;
   for (const [row] of sections) {
-    if (![123, 126, 129, 132, 135, 138, 141, 144].includes(row)) sectionNumber++;
-    set(row, row >= 123 && row <= 144 ? `${sectionNumber}.${(row - 120) / 3}` : String(sectionNumber));
+    const collectorSubsection = section === '17' && row >= 123 && row <= 144;
+    if (!collectorSubsection) sectionNumber++;
+    set(row, collectorSubsection ? `${sectionNumber}.${(row - 120) / 3}` : String(sectionNumber));
   }
   const removeIndexRow = (index: number) => {
     let node: Node | null = p[index];
@@ -258,11 +281,11 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
   for (let i = 374; i <= 392; i++) if (![383, 384].includes(i)) remove(i);
   if (section !== '17') {
     const rows = new Set<Node>();
-    for (let i = 120; i <= 146; i++) { let node: Node | null = p[i]; while (node && !(node.nodeType === 1 && (node as Element).localName === 'tr')) node = node.parentNode; if (node) rows.add(node); }
+    for (let i = 120; i <= 146; i++) { if (hasReferences && i >= 141 && i <= 143) continue; let node: Node | null = p[i]; while (node && !(node.nodeType === 1 && (node as Element).localName === 'tr')) node = node.parentNode; if (node) rows.add(node); }
     rows.forEach(row => row.parentNode?.removeChild(row));
     const table = p[317].parentNode?.parentNode?.parentNode;
     if (table && (table as Element).localName === 'tbl') table.parentNode?.removeChild(table);
-    for (let i = 266; i <= 373; i++) remove(i);
+    for (let i = 266; i <= 373; i++) if (!hasReferences || (i !== 356 && i !== 357)) remove(i);
     [378, 386, 392].forEach(remove);
   } else {
     const c = review.collector;
@@ -280,9 +303,10 @@ export async function populateCanonicalMotivation(bytes: Uint8Array, s: Motivati
     set(316, 'No comparison firearms selected; no other firearm history is inferred.');
     set(337, c.legalReviewed && c.regulation15 ? c.regulation15 : '[APPLICABLE REGULATION 15 REQUIREMENTS REVIEW REQUIRED]');
     for (let i = 338; i <= 354; i++) remove(i);
-    set(357, claims.length ? claims.map(c => `${c.source.title}; ${c.source.publisher ?? 'publisher not recorded'}; ${c.source.publishedDate ?? 'date not recorded'}; ${c.source.url}`).join('\n') : 'No reviewed external factual claims included.');
+    if (!hasReferences) { remove(356); remove(357); removeIndexRow(141); }
     [377, 385].forEach(remove);
   }
+  if (hasReferences) set(357, [...new Set(claims.map(c => `${c.source.title}; ${c.source.publisher ?? 'publisher not recorded'}; ${c.source.publishedDate ?? 'date not recorded'}; ${c.source.url}`))].join('\n'));
   if (section === '17') for (let i = 366; i <= 373; i++) remove(i);
   zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
