@@ -158,3 +158,52 @@ uncertainInsert = false;
 const clientOnly = await normalService.uploadClientDocument({ ...normalInput, applicationCaseId: undefined, firearmId: undefined, documentType: 'SUPPORTING_DOCUMENT' });
 assert.equal(clientOnly.application_case_id, null); assert.equal(clientOnly.firearm_id, null);
 console.log('PASS: normal private uploads, authorized legacy sources, linkage/identity denial, confirmed rejection cleanup, surfaced cleanup failure and committed/uncertain file preservation');
+
+// Existing certificate validity correction, through normal authenticated RLS paths.
+const certificates = ['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE', 'GOOD_STANDING'].map(type => ({
+  id: type, document_type: type, client_id: 'client', dealer_id: 'dealer', owner_user_id: 'owner', record_scope: 'PRIVATE',
+  application_case_id: 'case', lifecycle_status: 'ACTIVE', is_verified: true, expiry_date: null, metadata: {},
+  storage_path: `${type}.pdf`, firearm_id: null, competency_id: null, firearm_licence_id: null, issued_by: null,
+}));
+const validityApplication = { id: 'case', client_id: 'client', dealer_id: 'dealer', owner_user_id: 'owner', record_scope: 'PRIVATE', licence_section: '16' };
+const savedAnswers = { associationMember: 'YES', associationName: 'SA Hunters', associationExpiry: '2027-09-12', associationNoExpiry: false };
+const validityDb = { auth: normalDb.auth, from(table) {
+  const filters = []; let update;
+  const q = { select() { return q; }, eq(k,v) { filters.push([k,v]); return q; }, update(value) { update = value; return q; }, async single() {
+    const rows = table === 'documents' ? certificates : table === 'application_cases' ? [validityApplication]
+      : [{ id: 'client', dealer_id: 'dealer', saps271_declarations: { applications: { case: savedAnswers } } }];
+    const row = rows.find(row => filters.every(([k,v]) => row[k] === v)
+      && (table === 'clients' || row.owner_user_id === currentUser));
+    if (row && update) Object.assign(row, update);
+    return { data: row, error: row ? null : { message: 'RLS denied' } };
+  } }; return q;
+} };
+const certificateService = loader({ '../lib/supabase': { supabase: validityDb } })('src/services/documentService.ts');
+const validityEngine = loader()('src/engines/canonicalMotivationEngine.ts');
+const certificateSources = { client: { id: 'client', dealer_id: 'dealer' }, application: validityApplication, firearm: { id: 'firearm' }, documents: certificates };
+const eligible = type => validityEngine.applicableMotivationEvidence(certificateSources).some(d => d.document_type === type);
+assert.equal(await certificateService.suggestedMembershipExpiry('MEMBERSHIP_CERTIFICATE', 'owner', 'case'), '2027-09-12');
+assert.equal(await certificateService.suggestedMembershipExpiry('DEDICATED_STATUS', 'owner', 'case'), null, 'dedicated expiry never derives from membership');
+assert.equal(eligible('MEMBERSHIP_CERTIFICATE'), false);
+assert.equal(eligible('DEDICATED_STATUS'), false);
+assert.equal(eligible('GOOD_STANDING'), true);
+await certificateService.saveCertificateExpiry('MEMBERSHIP_CERTIFICATE', 'owner', savedAnswers.associationExpiry);
+await certificateService.saveCertificateExpiry('DEDICATED_STATUS', 'owner', '2027-09-30');
+assert.equal(eligible('MEMBERSHIP_CERTIFICATE'), true); assert.equal(eligible('DEDICATED_STATUS'), true);
+assert.ok(certificates.every(d => d.is_verified), 'validity correction preserves actual verification');
+await certificateService.saveCertificateExpiry('DEDICATED_STATUS', 'owner', '2025-06-22');
+assert.equal(eligible('DEDICATED_STATUS'), false);
+await assert.rejects(certificateService.saveCertificateExpiry('DEDICATED_STATUS', 'owner', '2026-02-30'), /valid-until/);
+certificates[1].is_verified = false; assert.equal(eligible('MEMBERSHIP_CERTIFICATE'), false); certificates[1].is_verified = true;
+certificates[1].application_case_id = 'another-case'; assert.equal(eligible('MEMBERSHIP_CERTIFICATE'), false); certificates[1].application_case_id = 'case';
+currentUser = 'other-staff';
+await assert.rejects(certificateService.saveCertificateExpiry('DEDICATED_STATUS', 'owner', '2099-01-01'), /owner/);
+await assert.rejects(certificateService.saveCertificateExpiry('DEDICATED_STATUS', 'other-staff', '2099-01-01'), /unavailable/);
+currentUser = 'owner';
+await assert.rejects(certificateService.saveCertificateExpiry('GOOD_STANDING', 'owner', '2099-01-01'), /unavailable/);
+certificates[1].expiry_date = null; certificates[1].issued_by = 'Different association';
+assert.equal(await certificateService.suggestedMembershipExpiry('MEMBERSHIP_CERTIFICATE', 'owner', 'case'), null);
+const librarySource = readFileSync('src/screens/DocumentLibraryScreen.tsx', 'utf8');
+assert.match(librarySource, /Verified — validity date required/);
+assert.match(librarySource, /Edit validity date/); assert.match(librarySource, /Save validity date/);
+console.log('PASS: saved membership expiry suggestion, separate dedicated validity entry, unchanged verification, current/expired/unknown eligibility, owner/linkage guards and existing-library validity controls');

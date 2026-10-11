@@ -3,6 +3,8 @@ import { assertSupportedSafeEvidenceFormat } from '../utils/documentFormatPolicy
 import { currentGenerated271, isGenerated271, saps271GeneratedState, saps271SourceSnapshot } from '../utils/saps271GeneratedState';
 import { buildApplicationAutofillPackage } from './applicationAutofillService';
 import { createReviewValues } from './generatedApplicationDocumentService';
+import { certificateValidity } from '../utils/documentValidity';
+import { applicationFormAnswers } from '../utils/applicationFormAnswers';
 
 import type {
   ClientDocumentSummary,
@@ -448,6 +450,46 @@ export async function archiveDocument(
   if (result.error) {
     throw new Error(result.error.message);
   }
+}
+
+async function ownedValidityCertificate(documentId: string, userId: string): Promise<DocumentRecord> {
+  const auth = await supabase.auth.getUser();
+  if (auth.error || auth.data.user?.id !== userId) throw new Error('Sign in as the certificate owner.');
+  const result = await db.from('documents').select('*').eq('id', documentId)
+    .eq('owner_user_id', userId).eq('record_scope', 'PRIVATE').eq('lifecycle_status', 'ACTIVE').single();
+  if (result.error || !result.data || !['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(result.data.document_type)) {
+    throw new Error('The authorized certificate is unavailable.');
+  }
+  return result.data as DocumentRecord;
+}
+
+export async function suggestedMembershipExpiry(documentId: string, userId: string, applicationCaseId?: string): Promise<string | null> {
+  const document = await ownedValidityCertificate(documentId, userId);
+  if (document.expiry_date || document.document_type !== 'MEMBERSHIP_CERTIFICATE') return document.expiry_date;
+  const caseId = applicationCaseId ?? document.application_case_id;
+  if (!caseId || (document.application_case_id && !documentReferencesApplicationCase(document, caseId))) return null;
+  const application = await db.from('application_cases').select('*').eq('id', caseId)
+    .eq('client_id', document.client_id).eq('dealer_id', document.dealer_id).eq('owner_user_id', userId).eq('record_scope', 'PRIVATE').single();
+  if (application.error || !application.data
+    || (document.firearm_id && document.firearm_id !== application.data.firearm_id)
+    || (document.competency_id && document.competency_id !== application.data.competency_id)
+    || (document.firearm_licence_id && document.firearm_licence_id !== application.data.firearm_licence_id)) return null;
+  const client = await db.from('clients').select('saps271_declarations').eq('id', document.client_id).eq('dealer_id', document.dealer_id).single();
+  if (client.error || !client.data) return null;
+  const answers = applicationFormAnswers(client.data.saps271_declarations, caseId);
+  if (answers.associationMember !== 'YES' || answers.associationNoExpiry || !answers.associationName?.trim()
+    || (document.issued_by && document.issued_by.trim().toLowerCase() !== answers.associationName.trim().toLowerCase())
+    || certificateValidity(answers.associationExpiry) === 'MISSING') return null;
+  return answers.associationExpiry!;
+}
+
+export async function saveCertificateExpiry(documentId: string, userId: string, expiry: string): Promise<void> {
+  const document = await ownedValidityCertificate(documentId, userId);
+  if (certificateValidity(expiry) === 'MISSING') throw new Error('Enter the certificate valid-until date as YYYY-MM-DD.');
+  const saved = await db.from('documents').update({ expiry_date: expiry, updated_at: new Date().toISOString() })
+    .eq('id', document.id).eq('owner_user_id', userId).eq('dealer_id', document.dealer_id)
+    .eq('client_id', document.client_id).eq('record_scope', 'PRIVATE').eq('lifecycle_status', 'ACTIVE').select('id').single();
+  if (saved.error || !saved.data) throw new Error('Unable to save the authorized certificate validity.');
 }
 
 export async function setDocumentVerified(

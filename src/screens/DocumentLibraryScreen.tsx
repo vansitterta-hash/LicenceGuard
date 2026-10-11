@@ -48,6 +48,8 @@ import {
   createDocumentSignedUrl,
   listClientDocuments,
   setDocumentVerified,
+  suggestedMembershipExpiry,
+  saveCertificateExpiry,
   summariseClientDocuments,
   uploadClientDocument,
   type DocumentUploadFile,
@@ -66,6 +68,7 @@ import {
 } from '../types/document';
 import type { RootStackParamList } from '../types/navigation';
 import { openExternalDocument } from '../utils/openExternalDocument';
+import { certificateValidity } from '../utils/documentValidity';
 
 type Props = NativeStackScreenProps<
   RootStackParamList,
@@ -125,6 +128,31 @@ export default function DocumentLibraryScreen({
     useState<string | null>(null);
   const [form, setForm] =
     useState<UploadFormState>(EMPTY_UPLOAD_FORM);
+  const [validityDocument, setValidityDocument] = useState<DocumentRecord | null>(null);
+  const [validityDate, setValidityDate] = useState('');
+  const [validityError, setValidityError] = useState<string | null>(null);
+  const [validitySaving, setValiditySaving] = useState(false);
+  const editValidity = async (document: DocumentRecord) => {
+    if (!user?.id) return;
+    setWorkingDocumentId(document.id);
+    try {
+      const saved = await suggestedMembershipExpiry(document.id, user.id, route.params.applicationCaseId);
+      setValidityError(null);
+      setValidityDate(saved ?? document.expiry_date ?? '');
+      setValidityDocument(document);
+    } catch (error) { Alert.alert('Unable to edit validity', error instanceof Error ? error.message : 'Unable to load certificate validity.'); }
+    finally { setWorkingDocumentId(null); }
+  };
+  const saveValidity = async () => {
+    if (!user?.id || !validityDocument) return;
+    setValiditySaving(true);
+    try {
+      await saveCertificateExpiry(validityDocument.id, user.id, validityDate.trim());
+      setValidityDocument(null);
+      await loadData(false);
+    } catch (error) { setValidityError(error instanceof Error ? error.message : 'Unable to save certificate validity.'); }
+    finally { setValiditySaving(false); }
+  };
 
   const isCompact = width < 780;
 
@@ -660,6 +688,8 @@ export default function DocumentLibraryScreen({
                     ? undefined
                     : () => void toggleVerification(document)
                 }
+                onValidity={['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(document.document_type)
+                  ? () => void editValidity(document) : undefined}
               />
             ))}
           </View>
@@ -697,6 +727,16 @@ export default function DocumentLibraryScreen({
         ) : null}
       </Screen>
 
+      <Modal visible={Boolean(validityDocument)} transparent onRequestClose={() => { if (!validitySaving) setValidityDocument(null); }}>
+        <View style={styles.modalOverlay}><Card style={styles.modalCard}>
+          <Text style={styles.sectionTitle}>Certificate validity</Text>
+          <Text style={styles.sectionSubtitle}>Enter the valid-until date from this certificate. A saved membership expiry is prefilled where applicable; confirm it matches this certificate. Verification remains unchanged.</Text>
+          <TextInput accessibilityLabel="Certificate valid-until date" placeholder="YYYY-MM-DD" value={validityDate} onChangeText={setValidityDate} editable={!validitySaving} style={{ color: Colors.text }} />
+          {validityError ? <Text style={styles.uploadError}>{validityError}</Text> : null}
+          <Button title="Save validity date" loading={validitySaving} onPress={() => void saveValidity()} />
+          <Button title="Cancel" disabled={validitySaving} onPress={() => setValidityDocument(null)} />
+        </Card></View>
+      </Modal>
       <Modal
         animationType="fade"
         onRequestClose={resetUpload}
@@ -1019,6 +1059,7 @@ type DocumentCardProps = {
   onOpen: () => void;
   onVerify?: () => void;
   onArchive?: () => void;
+  onValidity?: () => void;
 };
 
 function DocumentCard({
@@ -1029,6 +1070,7 @@ function DocumentCard({
   onOpen,
   onVerify,
   onArchive,
+  onValidity,
 }: DocumentCardProps) {
   const expiry = getExpiryVisual(
     document.expiry_date
@@ -1079,7 +1121,8 @@ function DocumentCard({
                 }
                 label={
                   document.is_verified
-                    ? 'Verified'
+                    ? (['DEDICATED_STATUS', 'MEMBERSHIP_CERTIFICATE'].includes(document.document_type)
+                      && certificateValidity(document.expiry_date) === 'MISSING' ? 'Verified — validity date required' : 'Verified')
                     : 'Awaiting verification'
                 }
                 tone={
@@ -1148,6 +1191,7 @@ function DocumentCard({
             variant="secondary"
           />
 
+          {!archived && onValidity ? <Button title="Edit validity date" disabled={loading} onPress={onValidity} size="small" variant="secondary" /> : null}
           {!archived && onVerify ? (
             <Button
               leftIcon={
