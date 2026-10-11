@@ -1,5 +1,6 @@
 // Synthetic local fixtures exercise implementation only; never physical acceptance.
 import assert from 'node:assert/strict';
+import ts from 'typescript';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { inflateSync } from 'node:zlib';
@@ -34,6 +35,11 @@ review.background = 'Applicant-supplied test background.';
 review.assertions = Object.fromEntries(Object.keys(engine.MASTER_ASSERTIONS).map(key => [key, true]));
 assert.deepEqual(engine.motivationReleaseIssues(sources, review), []);
 assert.deepEqual(review.evidenceIds, ['dedicated', 'id-proof', 'membership']);
+const reusableIdSources = structuredClone(sources);
+reusableIdSources.documents.find(d => d.id === 'id-proof').application_case_id = 'previous-application';
+assert.ok(engine.applicableMotivationEvidence(reusableIdSources).some(d => d.id === 'id-proof'), 'verified client identity remains reusable across applications');
+assert.ok(engine.motivationAnnexures(reusableIdSources, review).some(a => a.document.id === 'id-proof'), 'explicit ID selection is consumed by V2');
+assert.ok(!engine.motivationAnnexures(reusableIdSources, { ...review, evidenceIds: review.evidenceIds.filter(id => id !== 'id-proof') }).some(a => a.document.id === 'id-proof'), 'a saved draft never gains ID without selection');
 const xmlOf = async bytes => (await JSZip.loadAsync(bytes)).file('word/document.xml').async('string');
 const textOf = async bytes => new DOMParser().parseFromString(await xmlOf(bytes), 'application/xml').documentElement.textContent;
 const generated = await engine.populateCanonicalMotivation(master, sources, review, '2026-10-10');
@@ -116,6 +122,7 @@ rerunSources.documents.at(-1).metadata.researchSources.push({ id: 'old-unreviewe
 const newRun = evidence('new-research', 'SUPPORTING_RESEARCH', { firearm_id: 'firearm', is_verified: false, created_at: '2026-10-10T08:00:00Z', metadata: { researchContext: { generatedAt: '2026-10-10T12:00:00Z', discipline: 'Trap', provider: 'EXTERNAL_PROVIDER' }, researchSources: [{ id: 'new-source', title: 'New source publication', url: 'https://example.test/new', summary: 'Unreviewed new-run excerpt.' }] } });
 rerunSources.documents.push(newRun);
 const retainedBefore = JSON.stringify(rerunSources), claimsBefore = JSON.stringify(researched);
+assert.notEqual(engine.motivationSourceSnapshot(sources, researched), engine.motivationSourceSnapshot(rerunSources, researched), 'new unreviewed linked Research invalidates generated Motivation');
 const runs = engine.motivationResearchRuns(rerunSources);
 assert.equal(runs.current.document.id, 'new-research', 'run timestamp outranks document creation order');
 assert.deepEqual(runs.current.sources.map(source => source.id), ['new-source']);
@@ -338,6 +345,15 @@ const sourceReviewButtons = nodes(harness.tree).filter(n => n.type === 'Button' 
 assert.equal(sourceReviewButtons.length, 3, 'current and retained historical sources remain accessible');
 assert.equal(sourceReviewButtons.filter(n => n.props.title.startsWith('✓ ')).length, 1, 'only the original historical approval is preserved; current and older unreviewed sources stay unreviewed');
 const button = title => nodes(harness.tree).find(n => n.type === 'Button' && n.props.title === title);
+const freshUiWorkspace = structuredClone(uiWorkspace);
+uiWorkspace = { ...uiWorkspace, state: 'OUTDATED', current: historical, history: [historical] };
+button('Reload saved source data / Research').props.onPress(); await harness.settle();
+assert.equal(button('Open generated Motivation for review').props.disabled, true, 'stale V1 cannot be previewed as current');
+assert.ok(nodes(harness.tree).some(n => n.type === 'Button' && n.props.title === 'Review version 1 — historical / outdated'), 'V1 remains explicitly accessible as history');
+assert.equal(button('Confirm current Motivation').props.disabled, true);
+uiWorkspace = freshUiWorkspace;
+button('Reload saved source data / Research').props.onPress(); await harness.settle();
+assert.equal(button('Open generated Motivation for review').props.disabled, false, 'fresh regenerated V2 remains reviewable');
 assert.equal(button('Confirm current Motivation').props.disabled, true);
 button('Open generated Motivation for review').props.onPress(); await harness.settle(); assert.equal(uiPreviewed, 1);
 const confirmation = nodes(harness.tree).find(n => n.type === 'Button' && n.props.title.startsWith('I reviewed this generated version'));
@@ -349,5 +365,30 @@ assert.equal(button('Release confirmed PDF').props.disabled, true); assert.equal
 button('Save corrections').props.onPress(); await harness.settle(); assert.equal(button('Confirm current Motivation').props.disabled, true);
 button('Regenerate Motivation from corrections').props.onPress(); await harness.settle(); assert.equal(uiGenerated, 1); assert.equal(button('Confirm current Motivation').props.disabled, true);
 harness.unmount();
+// Execute the actual readiness handlers without booting unrelated screen services.
+const readinessSource = readFileSync('src/screens/ApplicationReadinessScreen.tsx', 'utf8');
+const readinessAst = ts.createSourceFile('readiness.tsx', readinessSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const readinessHandler = (name, environment) => {
+  let expression;
+  const visit = node => { if (ts.isVariableDeclaration(node) && node.name.getText(readinessAst) === name) expression = node.initializer.getText(readinessAst); ts.forEachChild(node, visit); };
+  visit(readinessAst); assert.ok(expression, name);
+  const code = ts.transpileModule(`const handler = ${expression};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  return new Function(...Object.keys(environment), code + '\nreturn handler;')(...Object.values(environment));
+};
+let workflowOpened = false; const navigations = [];
+const readinessCase = { applicationType: application.application_type, licenceSection: '16', caseId: 'case', firearmId: 'firearm' };
+const environment = { applicationCase: readinessCase, route: { params: { clientId: 'client', applicationCaseId: 'case' } }, navigation: { navigate: (...args) => navigations.push(args) }, setMotivationOpen: value => { workflowOpened = value; }, findRequirementDocument: () => historical };
+const openRequirement = readinessHandler('openRequirement', environment);
+openRequirement({ documentType: 'MOTIVATION', state: 'PENDING_GENERATION' });
+assert.equal(workflowOpened, true); assert.equal(navigations.length, 0, 'Motivation Generate cannot navigate to SAPS');
+openRequirement({ documentType: 'FIREARM_LICENCE_APPLICATION_FORM', state: 'PENDING_GENERATION' });
+assert.deepEqual(navigations[0], ['ApplicationAutofill', { clientId: 'client', applicationCaseId: 'case' }], 'existing SAPS route preserved');
+const findDocument = readinessHandler('findRequirementDocument', { ...environment, useCallback: fn => fn, documents: [historical], applicationDocuments: [historical] });
+assert.equal(findDocument({ documentType: 'MOTIVATION' }), undefined, 'no fallback to an arbitrary stale artifact');
+let storedPreviews = 0; workflowOpened = false;
+const openStored = readinessHandler('openStoredDocument', { ...environment, useCallback: fn => fn, setOpeningDocumentId: () => {}, openExternalDocument: async () => { storedPreviews++; }, createDocumentSignedUrl: async () => 'mock:old', Alert: { alert: () => {} } });
+await openStored(historical); assert.equal(workflowOpened, true); assert.equal(storedPreviews, 0, 'readiness Preview enters fresh version-aware workflow');
+assert.match(readinessSource, /motivationOpen \? <Modal[\s\S]*?<MotivationReviewPanel/);
+assert.match(text, /Verified identity supporting document:/, 'V2 consumes the selected verified identity annexure');
 assert.equal(hash(readFileSync('docs/LicenceGuard-Master-Motivation-Canonical.docx')), expectedHash);
 console.log('PASS: canonical integrity/format preservation, real DOCX population, all section branches, contamination, unknown declarations, reviewed-source claims, verified/embedded annexures, private registration, link guards, freshness, regenerated history, renewed confirmation and current-version release checks. Browser rendering and production acceptance remain manual.');

@@ -3,6 +3,7 @@ import { userAlert as Alert } from '../utils/userAlert';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -104,6 +105,7 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   const [timeline, setTimeline] = useState<ApplicationWorkspaceEvent[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
+  const [motivationOpen, setMotivationOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -166,6 +168,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       if (requirement.documentId) {
         return documents.find((document) => document.id === requirement.documentId);
       }
+      if (requirement.documentType === 'MOTIVATION' && ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.applicationType)
+        && ['13', '15', '16', '17'].includes(applicationCase.licenceSection ?? '')) return undefined;
 
       const acceptedTypes = requirement.acceptableDocumentTypes ?? [requirement.documentType];
       const candidates = applicationDocuments.filter((document) => {
@@ -355,6 +359,10 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
 
 
   const openStoredDocument = useCallback(async (document: DocumentRecord) => {
+    if (document.document_type === 'MOTIVATION' && ['CANONICAL_V1', 'CANONICAL_V2'].includes(document.metadata?.motivationMappingVersion as string)) {
+      setMotivationOpen(true);
+      return;
+    }
     setOpeningDocumentId(document.id);
 
     try {
@@ -421,6 +429,11 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
   );
 
   const openRequirement = (requirement: ReadinessRequirement) => {
+    if (requirement.documentType === 'MOTIVATION' && ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.applicationType)
+      && ['13', '15', '16', '17'].includes(applicationCase.licenceSection ?? '')) {
+      setMotivationOpen(true);
+      return;
+    }
     if (['SAPS517_APPLICANT_DATA', 'SAPS271_DECLARATIONS'].includes(requirement.key)) {
       navigation.navigate('ClientForm', { clientId: route.params.clientId });
       return;
@@ -918,7 +931,12 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       </Card>
 
       {dealerProfile?.dealerId && user?.id && ['FIREARM_LICENCE_FIRST_APPLICATION', 'FIREARM_LICENCE_ADDITIONAL_APPLICATION'].includes(applicationCase.applicationType) && ['13', '15', '16', '17'].includes(applicationCase.licenceSection ?? '') && (
-        <MotivationReviewPanel identity={{ dealerId: dealerProfile.dealerId, userId: user.id, clientId: route.params.clientId, applicationCaseId: applicationCase.caseId }} onChanged={loadData} />
+        motivationOpen ? <Modal visible onRequestClose={() => setMotivationOpen(false)} animationType="slide">
+          <Screen>
+            <Button title="Return to application readiness" onPress={() => setMotivationOpen(false)} />
+            <MotivationReviewPanel identity={{ dealerId: dealerProfile.dealerId, userId: user.id, clientId: route.params.clientId, applicationCaseId: applicationCase.caseId }} onChanged={loadData} />
+          </Screen>
+        </Modal> : <MotivationReviewPanel key={JSON.stringify(documents)} identity={{ dealerId: dealerProfile.dealerId, userId: user.id, clientId: route.params.clientId, applicationCaseId: applicationCase.caseId }} onChanged={loadData} />
       )}
       <Card
         title="Application documents"

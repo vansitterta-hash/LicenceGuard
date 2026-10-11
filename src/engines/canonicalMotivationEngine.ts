@@ -30,7 +30,8 @@ export function applicableMotivationEvidence(s: MotivationSources): DocumentReco
   return s.documents.filter(d => d.lifecycle_status === 'ACTIVE' && d.is_verified && d.storage_path && EVIDENCE_TYPES.has(d.document_type)
     && d.metadata?.category !== 'APPLICATION_PACK'
     && (!d.expiry_date || d.expiry_date >= new Date().toISOString().slice(0, 10))
-    && (!d.application_case_id || d.application_case_id === s.application.id || (Array.isArray(d.metadata.applicationCaseIds) && d.metadata.applicationCaseIds.includes(s.application.id)))
+    && ((d.document_type === 'ID_COPY' && d.client_id === s.client.id && d.dealer_id === s.client.dealer_id)
+      || !d.application_case_id || d.application_case_id === s.application.id || (Array.isArray(d.metadata.applicationCaseIds) && d.metadata.applicationCaseIds.includes(s.application.id)))
     && (!d.firearm_id || d.firearm_id === s.firearm.id)
     && (!d.competency_id || d.competency_id === s.competency?.id)
     && (!d.firearm_licence_id || d.firearm_licence_id === s.application.firearm_licence_id)
@@ -143,6 +144,8 @@ export function motivationSourceSnapshot(s: MotivationSources, r: MotivationRevi
     firearm: { id: f.id, make: f.make, model: f.model, calibre: f.calibre, type: f.firearm_type, serial: f.serial_number, competency: f.required_competency },
     competency: k && { id: k.id, category: k.category, certificate: k.certificate_number, issued: k.issue_date, expires: k.expiry_date, verified: k.verified }, review: r,
     evidence: motivationAnnexures(s, r).map(({ letter, document: d }) => ({ letter, id: d.id, name: d.document_name, path: d.storage_path, checksum: d.checksum_sha256, version: d.version_number, verified: d.is_verified, expires: d.expiry_date, metadata: d.metadata })),
+    research: s.documents.filter(d => d.lifecycle_status === 'ACTIVE' && d.document_type === 'SUPPORTING_RESEARCH' && d.application_case_id === a.id && d.firearm_id === f.id)
+      .sort((left, right) => left.id.localeCompare(right.id)).map(d => ({ id: d.id, version: d.version_number, createdAt: d.created_at, metadata: d.metadata })),
     claims: reviewedMotivationClaims(s, r), releaseIssues: motivationReleaseIssues(s, r) });
 }
 

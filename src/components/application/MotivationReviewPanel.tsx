@@ -45,10 +45,14 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
   const excludedResearch = researchDocuments.filter(d => !research.some(s => s.documentId === d.id));
   const unavailableClaims = review.claims.filter(c => !research.some(s => s.documentId === c.documentId && s.id === c.sourceId));
   const collector = workspace.sources.application.licence_section === '17';
-  const preview = async (document = workspace.current) => {
+  const preview = async (document = workspace.current, historical = false) => {
     if (!document) return;
+    if (!historical) {
+      const fresh = await getMotivationWorkspace(identity);
+      if (dirty || fresh.current?.id !== document.id || fresh.state === 'OUTDATED') throw new Error('This Motivation is outdated. Regenerate V2 before previewing the current document; earlier artifacts remain in version history.');
+    }
     await openExternalDocument(() => createDocumentSignedUrl(document.storage_path), { originatingRoute: 'ApplicationReadiness', applicationCaseId: identity.applicationCaseId, clientId: identity.clientId, workflowStep: 'motivation-review' });
-    if (document.id === workspace.current?.id && !dirty && workspace.state !== 'OUTDATED') { await markMotivationReviewed(identity, document.id); setRead(true); }
+    if (!historical && document.id === workspace.current?.id && !dirty && workspace.state !== 'OUTDATED') { await markMotivationReviewed(identity, document.id); setRead(true); }
   };
   return <Card title="Canonical Motivation" subtitle="Generate, review, correct and confirm this application’s Motivation before release.">
     <Text style={textStyle}>Current version: {workspace.current?.version_number ?? 'Not generated'} · {dirty ? 'Corrections require regeneration' : workspace.state}</Text>
@@ -94,14 +98,14 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
     <Button disabled={busy} loading={busy} title={workspace.current ? 'Regenerate Motivation from corrections' : 'Generate Motivation for review'} onPress={() => void run(() => generateMotivation(identity, review))} />
     {workspace.current && <>
       <Button disabled={busy || !dirty} title="Save corrections" variant="secondary" onPress={() => void run(() => saveMotivationCorrections(identity, workspace.current!.id, review))} />
-      <Button disabled={busy} title="Open generated Motivation for review" variant="secondary" onPress={() => void run(() => preview(), false)} />
+      <Button disabled={busy || dirty || workspace.state === 'OUTDATED'} title="Open generated Motivation for review" variant="secondary" onPress={() => void run(() => preview(), false)} />
       <Button disabled={busy || dirty || !read || workspace.state === 'OUTDATED'} title={`${confirmAccurate ? '✓ ' : ''}I reviewed this generated version and confirm its facts, claims and annexures`} variant="secondary" onPress={() => setConfirmAccurate(v => !v)} />
       <Button disabled={busy || dirty || !read || !confirmAccurate || workspace.issues.length > 0 || workspace.state === 'OUTDATED'} title="Confirm current Motivation" onPress={() => void run(() => confirmMotivation(identity, workspace.current!.id))} />
       <Button disabled={busy || dirty || workspace.state !== 'CONFIRMED'} title="Release confirmed PDF" variant="secondary" onPress={() => void run(async () => { await assertCurrentMotivationReleased(identity, workspace.current!.id); await preview(); }, false)} />
     </>}
     <Text style={textStyle}>The generated A4 Motivation index uses actual section page numbers. Review the regenerated pages and supporting annexures before confirmation.</Text>
     <Text style={textStyle}>Version history (older versions are retained and cannot replace the current version):</Text>
-    {workspace.history.map(d => <Button key={d.id} disabled={busy} title={`Review version ${d.version_number}${d.id === workspace.current?.id ? ' — current' : ' — historical'}`} variant="ghost" onPress={() => void run(() => preview(d), false)} />)}
+    {workspace.history.map(d => <Button key={d.id} disabled={busy} title={`Review version ${d.version_number}${d.id === workspace.current?.id && workspace.state !== 'OUTDATED' ? ' — current' : ' — historical / outdated'}`} variant="ghost" onPress={() => void run(() => preview(d, true), false)} />)}
     <Button disabled={busy} title="Reload saved source data / Research" variant="ghost" onPress={() => void load()} />
   </Card>;
 }
