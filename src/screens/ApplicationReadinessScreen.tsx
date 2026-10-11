@@ -580,6 +580,8 @@ export default function ApplicationReadinessScreen({ navigation, route }: Props)
       title: 'Competency',
       detail: competencyComplete
         ? 'The matching competency requirement is satisfied.'
+        : competencyRequirements.some(requirement => requirement.state === 'EXPIRED')
+          ? competencyRequirements.find(requirement => requirement.state === 'EXPIRED')!.detail
         : 'Add or confirm the matching competency.',
       complete: workflowCompletion[2],
       current: activeWorkflowIndex === 2,

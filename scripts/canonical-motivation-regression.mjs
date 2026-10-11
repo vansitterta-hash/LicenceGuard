@@ -197,6 +197,18 @@ const load = loader({ '../lib/supabase': { supabase: db }, '../engines/docxPdfRe
 const service = load('src/services/motivationService.ts');
 const readinessService = loader({ '../lib/supabase': { supabase: db }, './motivationService': service })('src/services/applicationReadinessService.ts');
 const motivationRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.documentType === 'MOTIVATION');
+const competencyRequirement = async () => (await readinessService.getClientApplicationReadiness('client')).cases[0].requirements.find(r => r.key === 'COMPETENCY_CERTIFICATE');
+const originalCompetency = structuredClone(tables.competencies[0]);
+tables.competencies[0].issue_date = '2020-06-22';
+assert.equal((await competencyRequirement()).state, 'SATISFIED', 'current verified competency remains complete');
+tables.competencies[0].expiry_date = '2025-06-22';
+const expiredBefore = JSON.stringify(tables.competencies);
+const expiredRequirement = await competencyRequirement();
+assert.equal(expiredRequirement.state, 'EXPIRED');
+assert.match(expiredRequirement.detail, /exists.*expired on 2025-06-22.*re-application.*current competency/);
+assert.equal(JSON.stringify(tables.competencies), expiredBefore, 'readiness never mutates the historical certificate');
+assert.equal(loader()('src/utils/reusableCompetency.ts').resolveReusableCompetency(tables.competencies, 'SHOTGUN', 'competency').expiry_date, '2025-06-22', 'expired competency remains resolvable historical evidence');
+Object.assign(tables.competencies[0], originalCompetency); delete tables.competencies[0].issue_date;
 service.assertMotivationLinkage(sources, identity);
 for (const change of [s => { s.application.client_id = 'foreign'; }, s => { s.firearm.client_id = 'foreign'; }, s => { s.firearm.owner_user_id = 'other'; }, s => { s.competency.id = 'foreign'; }]) { const s = structuredClone(sources); change(s); assert.throws(() => service.assertMotivationLinkage(s, identity), /inconsistent|owner/); }
 const originalFetch = globalThis.fetch;
@@ -321,17 +333,18 @@ try {
 } finally { globalThis.fetch = originalFetch; }
 
 // Bounded UI flow: preview + explicit confirmation, edits force regeneration.
-const harness = hookHarness(); let uiGenerated = 0, uiConfirmed = 0, uiPreviewed = 0;
+const harness = hookHarness(); let uiGenerated = 0, uiConfirmed = 0, uiPreviewed = 0, uiReviewed = 0;
+const uiSignedPaths = [];
 let uiWorkspace = { sources: rerunSources, review: structuredClone(researched), current: evidence('ui-current', 'MOTIVATION', { version_number: 1 }), state: 'AWAITING_REVIEW', issues: [], history: [] };
 const panel = loader({
   react: harness.react, 'react-native': nativeMock,
   '../Button': { default: 'Button', __esModule: true }, '../Card': { default: 'Card', __esModule: true }, '../TextField': { default: 'TextField', __esModule: true },
   '../../utils/userAlert': { userAlert: { alert: (_title, message) => { throw new Error(message); } } },
   '../../utils/openExternalDocument': { openExternalDocument: async resolve => { await resolve(); uiPreviewed++; } },
-  '../../services/documentService': { createDocumentSignedUrl: async () => 'mock:preview' },
+  '../../services/documentService': { createDocumentSignedUrl: async path => { uiSignedPaths.push(path); return 'mock:preview'; } },
   '../../services/motivationService': {
     getMotivationWorkspace: async () => structuredClone(uiWorkspace),
-    markMotivationReviewed: async () => {},
+    markMotivationReviewed: async () => { uiReviewed++; },
     generateMotivation: async (_id, r) => { uiGenerated++; uiWorkspace = { ...uiWorkspace, review: structuredClone(r), state: 'AWAITING_REVIEW', current: { ...uiWorkspace.current, version_number: 2 } }; },
     saveMotivationCorrections: async (_id, _doc, r) => { uiWorkspace = { ...uiWorkspace, review: structuredClone(r), state: 'OUTDATED' }; },
     confirmMotivation: async () => { uiConfirmed++; uiWorkspace = { ...uiWorkspace, state: 'CONFIRMED' }; },
@@ -351,11 +364,17 @@ button('Reload saved source data / Research').props.onPress(); await harness.set
 assert.equal(button('Open generated Motivation for review').props.disabled, true, 'stale V1 cannot be previewed as current');
 assert.ok(nodes(harness.tree).some(n => n.type === 'Button' && n.props.title === 'Review version 1 — historical / outdated'), 'V1 remains explicitly accessible as history');
 assert.equal(button('Confirm current Motivation').props.disabled, true);
+const annexureReviewBefore = JSON.stringify(uiWorkspace.review), supportingRowsBefore = JSON.stringify(uiWorkspace.sources.documents);
+button('Review supporting file').props.onPress(); await harness.settle();
+assert.equal(uiSignedPaths.at(-1), engine.applicableMotivationEvidence(uiWorkspace.sources)[0].storage_path, 'supporting review signs the intended authorized annexure');
+assert.equal(uiReviewed, 0, 'supporting review never approves the Motivation');
+assert.equal(JSON.stringify(uiWorkspace.review), annexureReviewBefore, 'supporting review never changes selection or approval');
+assert.equal(JSON.stringify(uiWorkspace.sources.documents), supportingRowsBefore, 'supporting review never verifies or mutates evidence');
 uiWorkspace = freshUiWorkspace;
 button('Reload saved source data / Research').props.onPress(); await harness.settle();
 assert.equal(button('Open generated Motivation for review').props.disabled, false, 'fresh regenerated V2 remains reviewable');
 assert.equal(button('Confirm current Motivation').props.disabled, true);
-button('Open generated Motivation for review').props.onPress(); await harness.settle(); assert.equal(uiPreviewed, 1);
+button('Open generated Motivation for review').props.onPress(); await harness.settle(); assert.equal(uiPreviewed, 2); assert.equal(uiReviewed, 1);
 const confirmation = nodes(harness.tree).find(n => n.type === 'Button' && n.props.title.startsWith('I reviewed this generated version'));
 confirmation.props.onPress(); await harness.settle(); assert.equal(button('Confirm current Motivation').props.disabled, false);
 button('Confirm current Motivation').props.onPress(); await harness.settle(); assert.equal(uiConfirmed, 1);
@@ -367,6 +386,8 @@ button('Regenerate Motivation from corrections').props.onPress(); await harness.
 harness.unmount();
 // Execute the actual readiness handlers without booting unrelated screen services.
 const readinessSource = readFileSync('src/screens/ApplicationReadinessScreen.tsx', 'utf8');
+assert.match(readinessSource, /competencyRequirements\.every\([\s\S]*?requirement\.state === 'SATISFIED'/, 'EXPIRED cannot render the Competency step complete');
+assert.match(readinessSource, /competencyRequirements\.some\(requirement => requirement\.state === 'EXPIRED'\)[\s\S]*?\.detail/, 'expired step exposes the re-application detail');
 const readinessAst = ts.createSourceFile('readiness.tsx', readinessSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const readinessHandler = (name, environment) => {
   let expression;

@@ -51,6 +51,7 @@ type CaseRow = {
 type CompetencyRow = {
   id: string;
   category: CompetencyCategory;
+  expiry_date: string | null;
   certificate_number: string | null;
   issue_date: string | null;
   verified: boolean;
@@ -355,6 +356,12 @@ export async function getClientApplicationReadiness(clientId: string): Promise<C
           : !matchingCompetency || !matchingCompetency.certificate_number || !matchingCompetency.issue_date
           ? 'MISSING'
           : matchingCompetency.verified ? 'SATISFIED' : 'UNVERIFIED';
+        // An expired certificate remains prior evidence for competency workflows,
+        // but cannot satisfy a firearm application's current competency requirement.
+        if (applicationCase.application_type.startsWith('FIREARM_') && matchingCompetency?.expiry_date && daysUntil(matchingCompetency.expiry_date) < 0) {
+          state = 'EXPIRED';
+          definition.detail = `The matching competency exists but expired on ${matchingCompetency.expiry_date}. Competency re-application / current competency is required.`;
+        }
       } else if (definition.key === 'SAPS517_APPLICANT_DATA') {
         const issues = saps517RequiredProfileIssues(client, applicationCase.competency_category);
         definition.detail = issues.join(' ') || 'Required SAPS 517 applicant information is complete.';

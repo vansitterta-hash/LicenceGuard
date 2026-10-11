@@ -45,14 +45,15 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
   const excludedResearch = researchDocuments.filter(d => !research.some(s => s.documentId === d.id));
   const unavailableClaims = review.claims.filter(c => !research.some(s => s.documentId === c.documentId && s.id === c.sourceId));
   const collector = workspace.sources.application.licence_section === '17';
-  const preview = async (document = workspace.current, historical = false) => {
+  const preview = async (document = workspace.current, kind: 'current' | 'history' | 'supporting' = 'current') => {
     if (!document) return;
-    if (!historical) {
+    if (kind === 'supporting' && !evidence.some(d => d.id === document.id && d.storage_path === document.storage_path)) throw new Error('Reload the authorized supporting evidence before reviewing this file.');
+    if (kind === 'current') {
       const fresh = await getMotivationWorkspace(identity);
       if (dirty || fresh.current?.id !== document.id || fresh.state === 'OUTDATED') throw new Error('This Motivation is outdated. Regenerate V2 before previewing the current document; earlier artifacts remain in version history.');
     }
     await openExternalDocument(() => createDocumentSignedUrl(document.storage_path), { originatingRoute: 'ApplicationReadiness', applicationCaseId: identity.applicationCaseId, clientId: identity.clientId, workflowStep: 'motivation-review' });
-    if (!historical && document.id === workspace.current?.id && !dirty && workspace.state !== 'OUTDATED') { await markMotivationReviewed(identity, document.id); setRead(true); }
+    if (kind === 'current' && document.id === workspace.current?.id && !dirty && workspace.state !== 'OUTDATED') { await markMotivationReviewed(identity, document.id); setRead(true); }
   };
   return <Card title="Canonical Motivation" subtitle="Generate, review, correct and confirm this application’s Motivation before release.">
     <Text style={textStyle}>Current version: {workspace.current?.version_number ?? 'Not generated'} · {dirty ? 'Corrections require regeneration' : workspace.state}</Text>
@@ -62,7 +63,7 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
     <Text style={textStyle}>Confirm each statement only if true. Unknown or conflicting answers block release; correct stored details through the existing profile/application screens.</Text>
     {Object.entries(MASTER_ASSERTIONS).map(([key, a]) => <Button key={key} disabled={busy} variant="secondary" title={`${review.assertions[key] ? '✓ ' : 'Confirm: '}${a.label}`} onPress={() => update({ assertions: { ...review.assertions, [key]: !review.assertions[key] } })} />)}
     <Text style={textStyle}>Verified annexures — select only evidence applicable to this application.</Text>
-    {evidence.map(d => <View key={d.id}><Button disabled={busy} variant="secondary" title={`${review.evidenceIds.includes(d.id) ? '✓ ' : ''}${d.document_name}`} onPress={() => update({ evidenceIds: review.evidenceIds.includes(d.id) ? review.evidenceIds.filter(id => id !== d.id) : [...review.evidenceIds, d.id] })} /><Button disabled={busy} title="Review supporting file" variant="ghost" onPress={() => void run(() => preview(d), false)} /></View>)}
+    {evidence.map(d => <View key={d.id}><Button disabled={busy} variant="secondary" title={`${review.evidenceIds.includes(d.id) ? '✓ ' : ''}${d.document_name}`} onPress={() => update({ evidenceIds: review.evidenceIds.includes(d.id) ? review.evidenceIds.filter(id => id !== d.id) : [...review.evidenceIds, d.id] })} /><Button disabled={busy} title="Review supporting file" variant="ghost" onPress={() => void run(() => preview(d, 'supporting'), false)} /></View>)}
     {review.evidenceIds.some(id => !evidence.some(d => d.id === id)) && <Button disabled={busy} title="Remove unavailable or no-longer-verified annexures" onPress={() => update({ evidenceIds: review.evidenceIds.filter(id => evidence.some(d => d.id === id)) })} />}
     <Text style={textStyle}>Research claims — inspect the original source, correct the claim, then explicitly mark it reviewed. Unreviewed results are omitted.</Text>
     <Text style={textStyle}>Available source publications: {research.length}. Reviewed source-backed claims eligible for inclusion: {eligibleClaims.length}. Sources requiring claim review: {research.filter(s => !eligibleClaims.some(c => c.documentId === s.documentId && c.sourceId === s.id)).length}. Excluded/unavailable Research documents: {excludedResearch.length}. Unavailable saved claims: {unavailableClaims.length}.</Text>
@@ -105,7 +106,7 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
     </>}
     <Text style={textStyle}>The generated A4 Motivation index uses actual section page numbers. Review the regenerated pages and supporting annexures before confirmation.</Text>
     <Text style={textStyle}>Version history (older versions are retained and cannot replace the current version):</Text>
-    {workspace.history.map(d => <Button key={d.id} disabled={busy} title={`Review version ${d.version_number}${d.id === workspace.current?.id && workspace.state !== 'OUTDATED' ? ' — current' : ' — historical / outdated'}`} variant="ghost" onPress={() => void run(() => preview(d, true), false)} />)}
+    {workspace.history.map(d => <Button key={d.id} disabled={busy} title={`Review version ${d.version_number}${d.id === workspace.current?.id && workspace.state !== 'OUTDATED' ? ' — current' : ' — historical / outdated'}`} variant="ghost" onPress={() => void run(() => preview(d, 'history'), false)} />)}
     <Button disabled={busy} title="Reload saved source data / Research" variant="ghost" onPress={() => void load()} />
   </Card>;
 }
