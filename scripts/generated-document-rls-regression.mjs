@@ -24,7 +24,7 @@ const policies = [...sql.matchAll(/create policy "[^"]+"\s+on public\.documents[
 assert.equal(policies.length, 4, 'live documents policies: SELECT, INSERT, UPDATE, DELETE');
 const files = new Map();
 let rejectRead = false;
-const columns = ['id', 'dealer_id', 'client_id', 'application_case_id', 'owner_user_id', 'record_scope', 'uploaded_by', 'storage_path'];
+const columns = ['id', 'dealer_id', 'client_id', 'application_case_id', 'firearm_id', 'owner_user_id', 'record_scope', 'uploaded_by', 'storage_path'];
 const db = {
   storage: { from() { return {
     async upload(path, blob) { files.set(path, new Uint8Array(await blob.arrayBuffer())); return { error: null }; },
@@ -38,6 +38,7 @@ const db = {
       insert(value) { payload = value; return q; },
       select() { returning = true; return q; },
       eq(key, value) { assert.ok(columns.includes(key)); filters.push([key, value]); return q; },
+      is(key, value) { return q.eq(key, value); },
       single() { single = true; return q; },
       async then(resolve, reject) {
         try {
@@ -50,7 +51,7 @@ const db = {
           } else {
             if (rejectRead) throw Error('Read-back unavailable');
             assert.equal(returning, true);
-            result = await pg.query(`select * from public.documents where ${filters.map(([k], i) => `${k} = $${i + 1}`).join(' and ')}`, filters.map(([, v]) => v));
+            result = await pg.query(`select * from public.documents where ${filters.map(([k], i) => `${k} is not distinct from $${i + 1}`).join(' and ')}`, filters.map(([, v]) => v));
           }
           const rows = result.rows.map(({ record, ...row }) => ({ ...record, ...row }));
           if (single && rows.length !== 1) throw Error('Expected one authorized generated document');
@@ -69,7 +70,7 @@ try {
     create table public.dealers (id uuid primary key, workspace_kind text);
     create table public.dealer_users (user_id uuid, dealer_id uuid, role text, is_active boolean);
     create table public.dealer_user_permissions (user_id uuid, dealer_id uuid, permission text, scope_type text, expires_at timestamptz);
-    create table public.documents (id uuid primary key default gen_random_uuid(), dealer_id uuid not null, client_id uuid not null, application_case_id uuid, owner_user_id uuid, record_scope public.record_scope not null default 'PRIVATE', uploaded_by uuid, storage_path text, record jsonb);
+    create table public.documents (id uuid primary key default gen_random_uuid(), dealer_id uuid not null, client_id uuid not null, application_case_id uuid, firearm_id uuid, owner_user_id uuid, record_scope public.record_scope not null default 'PRIVATE', uploaded_by uuid, storage_path text, record jsonb);
     create function public.is_dealer_member(target_dealer_id uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists (select 1 from public.dealer_users where user_id = auth.uid() and dealer_id = target_dealer_id and is_active = true) $$;
     create function public.is_dealer_admin(target_dealer_id uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists (select 1 from public.dealer_users where user_id = auth.uid() and dealer_id = target_dealer_id and is_active = true and role in ('owner','administrator')) $$;
     ${authorization}
@@ -165,4 +166,38 @@ try {
     assert.ok((await pg.query('select storage_path from public.documents')).rows.every(row => files.has(row.storage_path)));
     console.log('PASS: real PostgreSQL compiled-pack registration is PRIVATE, plain INSERT + authorized read-back; same-dealer access denied; saved SAPS/ID reused; missing owner and read-back failures do not advance workflow');
   } finally { globalThis.fetch = priorFetch; }
+  const normalDb = {
+    ...db,
+    auth: { getUser: async () => ({ data: { user: { id: (await pg.query('select auth.uid() as id')).rows[0].id } }, error: null }) },
+    from(table) {
+      if (table === 'documents') return db.from(table);
+      const filters = [];
+      const q = { select() { return q; }, eq(k, v) { filters.push([k, v]); return q; }, async single() {
+        let row;
+        if (table === 'dealer_users') row = (await pg.query('select * from public.dealer_users where user_id = auth.uid()')).rows[0];
+        else if (table === 'clients') row = { id: client, dealer_id: dealer, record_scope: 'PRIVATE', owner_user_id: null };
+        else if (table === 'application_cases') row = { id: application, dealer_id: dealer, client_id: client, record_scope: 'PRIVATE', owner_user_id: owner };
+        else throw Error('Unexpected preflight table');
+        return { data: row && filters.every(([k, v]) => row[k] === v) ? row : null, error: null };
+      } }; return q;
+    },
+  };
+  const normalService = loader({ '../lib/supabase': { supabase: normalDb } })('src/services/documentService.ts');
+  const blob = new Blob([new Uint8Array([37, 80, 68, 70])], { type: 'application/pdf' });
+  const normalInput = { dealerId: dealer, clientId: client, applicationCaseId: application, userId: owner,
+    documentType: 'DEDICATED_STATUS', documentName: 'Synthetic dedicated status',
+    file: { name: 'dedicated.pdf', uri: '', webFile: blob, mimeType: 'application/pdf', size: blob.size } };
+  const uploaded = await normalService.uploadClientDocument(normalInput);
+  assert.equal(uploaded.owner_user_id, owner); assert.equal(uploaded.record_scope, 'PRIVATE');
+  assert.equal(uploaded.is_verified, false); assert.equal(uploaded.application_case_id, application);
+  assert.ok(files.has(uploaded.storage_path));
+  await pg.query("select set_config('request.jwt.claim.sub', $1, false)", [colleague]);
+  assert.equal((await pg.query('select * from public.documents where id = $1', [uploaded.id])).rows.length, 0);
+  await assert.rejects(normalService.uploadClientDocument(normalInput), /Sign in/);
+  await pg.query("select set_config('request.jwt.claim.sub', $1, false)", [owner]);
+  rejectRead = true;
+  await assert.rejects(normalService.uploadClientDocument({ ...normalInput, file: { ...normalInput.file, name: 'read-failure.pdf' } }), /document was saved/);
+  rejectRead = false;
+  assert.ok((await pg.query('select storage_path from public.documents')).rows.every(row => files.has(row.storage_path)));
+  console.log('PASS: normal supporting upload uses real PostgreSQL owner-private INSERT/read-back RLS, remains unverified, denies colleague access, and preserves saved file on read failure (source preflight mocked)');
 } finally { await pg.close(); }

@@ -35,7 +35,7 @@ type ReusableRequirement = {
 
 type SupabaseOperationResult<T> = {
   data: T;
-  error: { message: string } | null;
+  error: { message: string; code?: string } | null;
 };
 
 const GENERATED_APPLICATION_FORM_TYPES = new Set<DocumentType>([
@@ -264,6 +264,31 @@ export async function listDocumentTemplates(): Promise<
 export async function uploadClientDocument(
   input: UploadClientDocumentInput
 ): Promise<DocumentRecord> {
+  const authenticated = await supabase.auth.getUser();
+  const ownerId = authenticated.data.user?.id;
+  if (authenticated.error || !ownerId || ownerId !== input.userId) {
+    throw new Error('Sign in as the document owner before uploading.');
+  }
+  const member = await db.from('dealer_users').select('user_id')
+    .eq('dealer_id', input.dealerId).eq('user_id', ownerId).eq('is_active', true).single();
+  if (member.error || !member.data) throw new Error('The authorized workspace is required.');
+  const source = async (table: string, id: string) => {
+    const result = await db.from(table).select('*').eq('id', id).eq('dealer_id', input.dealerId).single();
+    const record = result.data;
+    if (result.error || !record || record.id !== id || record.dealer_id !== input.dealerId || record.record_scope !== 'PRIVATE'
+      || (record.owner_user_id != null && record.owner_user_id !== ownerId)) {
+      throw new Error('The private upload source is unavailable or unauthorized.');
+    }
+    return record;
+  };
+  await source('clients', input.clientId);
+  const application = input.applicationCaseId ? await source('application_cases', input.applicationCaseId) : null;
+  const firearm = input.firearmId ? await source('firearms', input.firearmId) : null;
+  if ((application && application.client_id !== input.clientId)
+    || (firearm && (firearm.client_id !== input.clientId || firearm.is_active !== true))
+    || (application && firearm && application.firearm_id !== firearm.id)) {
+    throw new Error('The upload client/application/firearm relationships do not match.');
+  }
   if (input.documentType === 'PASSPORT_PHOTO') {
     throw new Error(
       'Passport photographs are physical submission items and are not stored in LicenceGuard.'
@@ -324,6 +349,8 @@ export async function uploadClientDocument(
     if (uploadResult.error) throw uploadResult.error;
 
     const insertPayload = {
+      owner_user_id: ownerId,
+      record_scope: 'PRIVATE',
       dealer_id: input.dealerId,
       client_id: input.clientId,
       competency_id: null,
@@ -351,34 +378,50 @@ export async function uploadClientDocument(
       is_generated: false,
       notes: emptyToNull(input.notes),
       metadata: input.metadata ?? {},
-      uploaded_by: input.userId,
+      uploaded_by: ownerId,
     };
     stage = 'insert-start';
-    const insertResult = await withTimeout<SupabaseOperationResult<DocumentRecord>>(
-      db.from('documents').insert(insertPayload).select('*').single(),
+    const insertResult = await withTimeout<SupabaseOperationResult<unknown>>(
+      db.from('documents').insert(insertPayload),
       30_000,
       'The document was uploaded, but saving its LicenceGuard record timed out.'
     );
-    if (insertResult.error) throw insertResult.error;
-    return insertResult.data;
-  } catch (error) {
-    if (stage === 'insert-start') {
+    if (insertResult.error) {
+      const code = insertResult.error.code ?? '';
+      if (!/^[0-9A-Z]{5}$/.test(code) || code.startsWith('08') || code === '40003') throw new Error(insertResult.error.message);
+      stage = 'insert-rejected';
+      // Clean up only a confirmed rejection; a timeout may have committed.
+      const message = insertResult.error.message;
       try {
-        await withTimeout(
-          db.storage.from(DOCUMENT_BUCKET).remove([storagePath]),
-          10_000,
-          'Storage cleanup timed out.'
+        const cleanup = await withTimeout<SupabaseOperationResult<unknown>>(
+          db.storage.from(DOCUMENT_BUCKET).remove([storagePath]), 10_000, 'Storage cleanup timed out.'
         );
-      } catch {
-        // Preserve the original upload failure if cleanup also fails.
+        if (cleanup.error) throw new Error(cleanup.error.message);
+      } catch (cleanupError) {
+        throw new Error(`${message} Storage cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}. The uploaded file may remain; do not retry blindly.`);
       }
+      throw new Error(message);
     }
+    stage = 'read-back';
+    let read = db.from('documents').select('*').eq('storage_path', storagePath)
+      .eq('dealer_id', input.dealerId).eq('client_id', input.clientId)
+      .eq('owner_user_id', ownerId).eq('record_scope', 'PRIVATE');
+    read = input.applicationCaseId ? read.eq('application_case_id', input.applicationCaseId) : read.is('application_case_id', null);
+    read = input.firearmId ? read.eq('firearm_id', input.firearmId) : read.is('firearm_id', null);
+    const saved = await withTimeout<SupabaseOperationResult<DocumentRecord>>(
+      read.single(), 30_000, 'Reading the saved document timed out.'
+    );
+    if (saved.error || !saved.data) throw new Error(saved.error?.message ?? 'No authorized document returned.');
+    return saved.data;
+  } catch (error) {
     const message = error instanceof Error
       ? error.message
       : typeof error === 'object' && error && 'message' in error
         ? String(error.message)
         : 'The document upload failed.';
-    throw new Error(`${stage}: ${message}`);
+    const recovery = stage === 'read-back' ? ' The document was saved; reload the document library before retrying.'
+      : stage === 'insert-start' ? ' Save outcome is unknown; the file was preserved. Reload the document library before retrying.' : '';
+    throw new Error(`${stage}: ${message}${recovery}`);
   }
 }
 
