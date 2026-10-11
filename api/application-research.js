@@ -81,39 +81,48 @@ export default async function handler(request, response) {
   if (!apiKey) return sendError(response, 503, 'Live research is not configured. Add the TAVILY_API_KEY production environment variable.');
   if (!consumeRequest(authenticatedUser.id)) return sendError(response, 429, 'Research rate limit reached. Try again later.');
 
-  const query = [
+  const shotgunAlias = /shotgun/i.test(fields.firearmType) && /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre) ? '12 bore 12 gauge' : '';
+  const firearmQuery = [
     fields.firearmMake,
     fields.firearmModel,
     fields.calibre,
     fields.firearmType,
+    shotgunAlias,
+    'manufacturer specifications technical characteristics firearm history production background sporting suitability',
+  ].filter(Boolean).join(' ').slice(0, 700);
+  const purposeQuery = [
+    fields.licenceSection ? `Section ${fields.licenceSection}` : '',
+    fields.applicationType,
     fields.purpose,
-    fields.discipline,
+    fields.discipline.trim().toLowerCase(),
     fields.association,
-    'manufacturer specifications technical data cartridge ballistics suitability sporting rules official sources South Africa',
+    fields.firearmType,
+    'sporting discipline firearm category suitability competition rules dedicated sport official sources South Africa',
   ].filter(Boolean).join(' ').slice(0, 700);
 
   try {
-    const searchResponse = await fetch('https://api.tavily.com/search', {
+    const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery' }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery', country: 'south africa' }];
+    const responses = await Promise.all(searches.map(search => fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query,
+        query: search.query,
         search_depth: 'basic',
         topic: 'general',
-        country: 'south africa',
+        ...(search.country ? { country: search.country } : {}),
         max_results: 6,
         include_answer: false,
         include_raw_content: false,
         include_usage: true,
       }),
-    });
-    if (!searchResponse.ok) {
+    })));
+    if (responses.some(response => !response.ok)) {
       return sendError(response, 502, 'The live research provider could not complete the search.');
     }
 
-    const payload = await searchResponse.json();
+    const payloads = await Promise.all(responses.map(response => response.json()));
     const generatedAt = new Date().toISOString();
-    const sources = (Array.isArray(payload.results) ? payload.results : []).flatMap((result, index) => {
+    const groups = payloads.map((payload, group) => (Array.isArray(payload.results) ? payload.results : []).flatMap((result, index) => {
       let url;
       try {
         url = new URL(result.url);
@@ -125,7 +134,7 @@ export default async function handler(request, response) {
       const summary = boundedText(result.content, 1800);
       if (!title || !summary) return [];
       return [{
-        id: `tavily:${boundedText(result.id, 100) || index}`,
+        id: `tavily:${group}:${boundedText(result.id, 100) || index}`,
         title,
         publisher: url.hostname,
         url: url.toString(),
@@ -133,7 +142,7 @@ export default async function handler(request, response) {
         trustLevel: 'UNREVIEWED',
         subjectType: subjectType(title, summary, fields),
         summary,
-        applicability: 'Search result for the supplied application context. Verify the original source and its relevance before relying on any claim.',
+        applicability: `${searches[group].subject} for the supplied context. Verify the original source and its relevance before relying on any claim.`,
         category: 'Live internet research',
         association: fields.association || null,
         discipline: fields.discipline || null,
@@ -143,7 +152,26 @@ export default async function handler(request, response) {
         sourceKind: 'EXTERNAL_PROVIDER',
         publishedDate: boundedText(result.published_date, 80) || null,
       }];
-    });
+    }));
+    // Alternate subjects within the existing six-source budget. Skip duplicate
+    // URLs without losing remaining unique results from either search.
+    const sources = [], seen = new Set();
+    const positions = [0, 0];
+    while (sources.length < 6 && groups.some((group, i) => positions[i] < group.length)) {
+      for (let i = 0; i < groups.length && sources.length < 6; i++) {
+        while (positions[i] < groups[i].length) {
+          const source = groups[i][positions[i]++];
+          const key = new URL(source.url); key.hash = '';
+          key.pathname = key.pathname.replace(/\/$/, '') || '/'; key.searchParams.sort();
+          if (seen.has(key.toString())) continue;
+          seen.add(key.toString()); sources.push(source); break;
+        }
+      }
+    }
+    const usage = {};
+    for (const payload of payloads) for (const [key, value] of Object.entries(payload.usage ?? {})) {
+      if (typeof value === 'number') usage[key] = (usage[key] ?? 0) + value;
+    }
 
     return response.status(200).json({
       provider: 'EXTERNAL_PROVIDER',
@@ -173,7 +201,7 @@ export default async function handler(request, response) {
         ...(sources.length ? [] : ['No usable search results were returned.']),
       ],
       generatedAt,
-      usage: payload.usage ?? null,
+      usage: Object.keys(usage).length ? usage : null,
     });
   } catch {
     return sendError(response, 502, 'The live research provider is temporarily unavailable.');

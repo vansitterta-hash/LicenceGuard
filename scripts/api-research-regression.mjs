@@ -8,6 +8,7 @@ const previousValues = {
   tavilyKey: process.env.TAVILY_API_KEY,
 };
 const providerRequests = [];
+let sessionValid = true;
 process.env.EXPO_PUBLIC_SUPABASE_URL = 'https://supabase.test';
 process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'public-key';
 
@@ -30,7 +31,7 @@ const request = (body, authorization = 'Bearer session-token') => ({
 try {
   globalThis.fetch = async (url, options = {}) => {
     if (String(url).endsWith('/auth/v1/user')) {
-      return { ok: true, json: async () => ({ id: 'user-1' }) };
+      return { ok: sessionValid, json: async () => ({ id: 'user-1' }) };
     }
     if (url === 'https://api.tavily.com/search') {
       providerRequests.push({ url, options });
@@ -40,6 +41,7 @@ try {
           usage: { credits: 1 },
           results: [
             { id: 'result-1', title: 'Official firearm data', url: 'https://example.test/firearm', content: 'Manufacturer technical specifications.', published_date: '2026-08-01' },
+            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: 'Source publication', url: `https://example.test/${JSON.parse(options.body).country ? 'sport' : 'technical'}/${i}`, content: 'Original source excerpt.' })),
             { id: 'bad-url', title: 'Ignored scheme', url: 'javascript:alert(1)', content: 'Invalid URL result.' },
             { id: 'empty', title: 'Missing content', url: 'https://example.test/empty', content: '' },
           ],
@@ -64,33 +66,57 @@ try {
   await handler(request({ firearm: { calibre: '20 gauge' }, purpose: 'ID 8001015009087' }), invalidPersonalData);
   assert.equal(invalidPersonalData.statusCode, 400);
   assert.equal(providerRequests.length, 0);
+  sessionValid = false;
+  const expired = createResponse();
+  await handler(request({ firearm: { calibre: '12 bore' } }), expired);
+  assert.equal(expired.statusCode, 401);
+  assert.equal(providerRequests.length, 0);
+  sessionValid = true;
 
   const response = createResponse();
   await handler(request({
     applicationType: 'FIREARM_LICENCE_FIRST_APPLICATION',
     licenceSection: '16',
     purpose: 'Dedicated sport shooting',
-    discipline: 'Trap',
+    discipline: 'Skeet',
     association: 'Sport Association',
-    firearm: { make: 'Beretta', model: '1301', calibre: '12 gauge', firearmType: 'SHOTGUN' },
+    firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN', serialNumber: '1165306' },
   }), response);
   assert.equal(response.statusCode, 200);
-  assert.equal(providerRequests.length, 1);
+  assert.equal(providerRequests.length, 2);
   assert.equal(providerRequests[0].options.headers.Authorization, 'Bearer server-only-test-key');
   assert.equal(providerRequests[0].options.body.includes('server-only-test-key'), false);
   const payload = JSON.parse(providerRequests[0].options.body);
   assert.equal(payload.search_depth, 'basic');
   assert.equal(payload.max_results, 6);
   assert.equal(payload.include_answer, false);
-  assert.equal(response.body.sourceCount, 1);
+  const purposePayload = JSON.parse(providerRequests[1].options.body);
+  assert.match(payload.query, /CZ.*12 BR SHOTGUN.*SHOTGUN.*12 bore 12 gauge/);
+  assert.doesNotMatch(payload.query, /skeet|Section 16|Sport Association|Dedicated sport|1165306|Beretta|1301|South Africa/);
+  assert.equal(Object.hasOwn(payload, 'country'), false);
+  assert.match(purposePayload.query, /Section 16.*FIREARM_LICENCE_FIRST_APPLICATION.*Dedicated sport shooting.*skeet.*Sport Association.*SHOTGUN/);
+  assert.equal(purposePayload.country, 'south africa');
+  assert.doesNotMatch(purposePayload.query, /1165306/);
+  assert.equal(response.body.firearm.model, null);
+  assert.equal(response.body.sourceCount, 6);
+  assert.equal(new Set(response.body.sources.map(s => s.url)).size, 6);
+  assert.ok(response.body.sources.some(s => s.url.includes('/technical/')));
+  assert.ok(response.body.sources.some(s => s.url.includes('/sport/')));
+  assert.ok(response.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && s.sourceKind === 'EXTERNAL_PROVIDER' && !Object.hasOwn(s, 'reviewed') && !Object.hasOwn(s, 'approved')));
+  assert.equal(Object.hasOwn(response.body, 'claims'), false);
+  assert.equal(response.body.usage.credits, 2);
   assert.equal(response.body.applicationType, 'FIREARM_LICENCE_FIRST_APPLICATION');
   assert.equal(response.body.licenceSection, '16');
   assert.equal(response.body.purpose, 'Dedicated sport shooting');
-  assert.equal(response.body.discipline, 'Trap');
+  assert.equal(response.body.discipline, 'Skeet');
   assert.equal(response.body.sources[0].trustLevel, 'UNREVIEWED');
   assert.equal(response.body.sources[0].publishedDate, '2026-08-01');
   assert.equal(response.body.sources[0].sourceKind, 'EXTERNAL_PROVIDER');
   assert.equal(response.body.findings[0].sourceUrl, 'https://example.test/firearm');
+  const storedModel = createResponse();
+  await handler(request({ licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: 'Stored test model', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } }), storedModel);
+  assert.equal(storedModel.statusCode, 200);
+  assert.match(JSON.parse(providerRequests[2].options.body).query, /CZ Stored test model 12 BR SHOTGUN/);
   console.log('Live research API auth, privacy filtering, server-only key, bounded search, and source mapping passed.');
 } finally {
   globalThis.fetch = previousFetch;
