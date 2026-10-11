@@ -39,6 +39,44 @@ function subjectType(title, content, fields) {
   return 'GENERAL';
 }
 
+// Discovery relevance is not fact verification or claim approval. Evaluate only
+// the supplied title/excerpt; unrelated results never pad the source budget.
+function relevanceScore(source, fields, group) {
+  const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const title = normalize(source.title), content = normalize(source.summary);
+  const text = `${title} ${content}`;
+  const contains = (haystack, value) => Boolean(value && (` ${haystack} `).includes(` ${normalize(value)} `));
+  const category = /shotgun/i.test(fields.firearmType) ? 'shotgun'
+    : /rifle/i.test(fields.firearmType) ? 'rifle'
+      : /pistol|revolver|handgun/i.test(fields.firearmType) ? 'handgun' : normalize(fields.firearmType);
+  const categoryMatch = contains(text, category) || (category === 'handgun' && /\b(pistol|revolver)\b/.test(text));
+  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel);
+  const gauge = /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
+    ? /\b12 (?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
+  const navigation = (text.match(/\b(home|contact us|login|log in|sign up|privacy policy|cookie policy|site map|menu|about us)\b/g) ?? []).length;
+  // Prefer no lead to an excerpt dominated by scraped navigation, even when
+  // its title carries search keywords. A full article can be reviewed separately.
+  if (navigation >= 3) return 0;
+  if (group === 0) {
+    const technical = /\b(manufacturer|specifications?|technical|barrel|chokes?|action|production|history|manufactured|design|sporting suitability)\b/.test(text);
+    const titleIdentity = contains(title, fields.firearmMake) || contains(title, fields.firearmModel) || contains(title, category);
+    if (!technical || !categoryMatch || !(make || model || gauge)) return 0;
+    // A matching make in a rifle/pistol article does not identify this shotgun.
+    if (category === 'shotgun' && /\b(rifle|pistol|handgun)\b/.test(title) && !contains(title, 'shotgun')) return 0;
+    return 8 + Number(make) * 4 + Number(model) * 6 + Number(gauge) * 3
+      + Number(titleIdentity) * 5 - navigation * 3;
+  }
+  const discipline = contains(text, fields.discipline);
+  const purpose = contains(text, fields.purpose);
+  const sporting = /\b(rules?|targets?|clays?|competition|sporting|equipment|range|sport|shooting)\b/.test(text);
+  if (!sporting || (fields.discipline ? !discipline : !(purpose && categoryMatch))) return 0;
+  const titleDiscipline = contains(title, fields.discipline);
+  if (category === 'shotgun' && /\b(rifle|pistol|handgun|hunting)\b/.test(title) && !titleDiscipline && !contains(title, 'shotgun')) return 0;
+  return 8 + Number(titleDiscipline) * 6 + Number(categoryMatch) * 4
+    + Number(purpose) * 2 + Number(contains(text, `Section ${fields.licenceSection}`))
+    + Number(/\.za(?:\/|$)/i.test(source.url)) - navigation * 3;
+}
+
 function consumeRequest(userId) {
   const now = Date.now();
   const recent = (requestCounts.get(userId) ?? []).filter((time) => now - time < WINDOW_MS);
@@ -152,7 +190,10 @@ export default async function handler(request, response) {
         sourceKind: 'EXTERNAL_PROVIDER',
         publishedDate: boundedText(result.published_date, 80) || null,
       }];
-    }));
+    }).map(source => ({ source, score: relevanceScore(source, fields, group) }))
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.source));
     // Alternate subjects within the existing six-source budget. Skip duplicate
     // URLs without losing remaining unique results from either search.
     const sources = [], seen = new Set();
@@ -198,6 +239,8 @@ export default async function handler(request, response) {
       })),
       warnings: [
         'Live search results are discovery leads, not verified facts or applicant-specific evidence. Review each original source before use.',
+        ...(sources.length < 6 ? ['Insufficient relevant sources to fill the six-source limit; unrelated results were not used as substitutes.'] : []),
+        ...groups.flatMap((group, i) => group.length ? [] : [`No relevant ${searches[i].subject.toLowerCase()} sources were found in the returned excerpts.`]),
         ...(sources.length ? [] : ['No usable search results were returned.']),
       ],
       generatedAt,

@@ -9,6 +9,7 @@ const previousValues = {
 };
 const providerRequests = [];
 let sessionValid = true;
+let resultOverrides = null;
 process.env.EXPO_PUBLIC_SUPABASE_URL = 'https://supabase.test';
 process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'public-key';
 
@@ -39,9 +40,9 @@ try {
         ok: true,
         json: async () => ({
           usage: { credits: 1 },
-          results: [
-            { id: 'result-1', title: 'Official firearm data', url: 'https://example.test/firearm', content: 'Manufacturer technical specifications.', published_date: '2026-08-01' },
-            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: 'Source publication', url: `https://example.test/${JSON.parse(options.body).country ? 'sport' : 'technical'}/${i}`, content: 'Original source excerpt.' })),
+          results: resultOverrides?.[JSON.parse(options.body).country ? 1 : 0] ?? [
+            { id: 'result-1', title: 'CZ 12 gauge shotgun specifications and skeet rules', url: 'https://example.test/firearm', content: 'Manufacturer technical specifications for the CZ shotgun and skeet sporting use.', published_date: '2026-08-01' },
+            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: JSON.parse(options.body).country ? 'Skeet shotgun competition rules' : '12 gauge shotgun technical specifications', url: `https://example.test/${JSON.parse(options.body).country ? 'sport' : 'technical'}/${i}`, content: 'Shotgun specifications and skeet competition context.' })),
             { id: 'bad-url', title: 'Ignored scheme', url: 'javascript:alert(1)', content: 'Invalid URL result.' },
             { id: 'empty', title: 'Missing content', url: 'https://example.test/empty', content: '' },
           ],
@@ -117,6 +118,33 @@ try {
   await handler(request({ licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: 'Stored test model', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } }), storedModel);
   assert.equal(storedModel.statusCode, 200);
   assert.match(JSON.parse(providerRequests[2].options.body).query, /CZ Stored test model 12 BR SHOTGUN/);
+  const publication = (id, title, content) => ({ id, title, content, url: `https://example.test/${id}` });
+  const navigation = publication('navigation', 'CZ shotgun specifications and Skeet rules', 'Home Contact us Log in Privacy policy Menu CZ shotgun manufacturer specifications skeet competition hunting rifle');
+  const association = publication('generic-association', 'SA Hunters dedicated membership', 'Dedicated sport shooting Section 16 membership and association navigation information.');
+  const wrongCategory = publication('wrong-category', 'CZ rifle history', 'Manufacturer specifications for CZ rifles, not a shotgun guide.');
+  resultOverrides = [
+    [navigation, association, wrongCategory,
+      publication('weak-firearm', '12 gauge shotgun context', 'Technical characteristics of 12 gauge shotguns.'),
+      publication('strong-firearm', 'CZ 12 gauge shotgun specifications', 'Manufacturer information, barrel and choke specifications, CZ shotgun production history.')],
+    [association, navigation, publication('wrong-discipline', 'Hunting rifle association', 'Rifle hunting competitions and dedicated membership.'),
+      publication('weak-purpose', 'Club newsletter', 'Skeet shooting competition uses a shotgun on the range.'),
+      publication('strong-purpose', 'Skeet shotgun competition rules', 'Skeet targets, equipment rules and shotgun sporting suitability in South Africa.')],
+  ];
+  const focused = createResponse();
+  const caseBody = { licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } };
+  await handler(request(caseBody), focused);
+  assert.equal(focused.statusCode, 200);
+  assert.equal(focused.body.sourceCount, 4, 'irrelevant material never fills the limit');
+  assert.deepEqual(focused.body.sources.map(s => s.url), ['strong-firearm', 'strong-purpose', 'weak-firearm', 'weak-purpose'].map(id => `https://example.test/${id}`));
+  assert.match(focused.body.warnings.join(' '), /Insufficient relevant sources/);
+  assert.ok(focused.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && !s.reviewed && !s.approved));
+  assert.equal(Object.hasOwn(focused.body, 'claims'), false);
+  resultOverrides = [[association, navigation, wrongCategory], [association, navigation]];
+  const insufficient = createResponse();
+  await handler(request(caseBody), insufficient);
+  assert.equal(insufficient.body.sourceCount, 0);
+  assert.equal(insufficient.body.providerStatus, 'REQUIRES_EXTERNAL_PROVIDER');
+  assert.match(insufficient.body.warnings.join(' '), /No relevant firearm-specific.*No relevant application-purpose/s);
   console.log('Live research API auth, privacy filtering, server-only key, bounded search, and source mapping passed.');
 } finally {
   globalThis.fetch = previousFetch;
