@@ -78,6 +78,15 @@ function relevanceScore(source, fields, group) {
   const modelName = fields.firearmModel.split(',')[0].trim();
   const make = contains(text, fields.firearmMake), model = contains(text, modelName);
   if (modelName && group === 0 && (!make || !model)) return -100;
+  if (modelName && contains(title, fields.firearmMake) && !contains(title, modelName)) return -100;
+  const recordedGauge = fields.calibre.match(/^(\d+)\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i)?.[1];
+  const gauges = value => [...value.matchAll(/\b(\d+)\s*(?:gauge|bore|ga|br)\b/g)].map(match => match[1]);
+  if (recordedGauge && (group === 0 || make || model)) {
+    const titleGauges = gauges(title), excerptGauges = gauges(content);
+    if (titleGauges.some(gauge => gauge !== recordedGauge)
+      || (excerptGauges.length && !excerptGauges.includes(recordedGauge))
+      || (group === 0 && modelName && !gauges(text).includes(recordedGauge))) return -100;
+  }
   // Named-maker material in a purpose result must also match the recorded
   // model. General discipline/category sources need no maker/model mention.
   if (modelName && make && !model) return -100;
@@ -100,6 +109,7 @@ function relevanceScore(source, fields, group) {
   }
   const sourcePath = (() => { try { return new URL(source.url).pathname; } catch { return ''; } })();
   if (/\b(?:top|best)\s+(?:\d+\s+)?(?:best\s+)?(?:12\s+gauge\s+)?shotguns?\b/.test(title)
+    || /\b(category|categories|portfolio|showcase|buying guide|search results)\b/.test(title)
     || /\b(review|reviews|buy|sale|deals|catalogue|catalog|products)\b/.test(title)
     || (/\/(?:product|products)(?:\/|$)/i.test(sourcePath) && !(model && /\b(specifications?|technical|barrels?|chokes?)\b/.test(content)))
     || /\/(?:shop|catalog|catalogue|category)(?:\/|$)/i.test(sourcePath)
@@ -174,6 +184,19 @@ function consumeRequest(userId) {
   return true;
 }
 
+function researchSourceKeys(source) {
+  const url = new URL(source.url);
+  url.hash = '';
+  url.hostname = url.hostname.replace(/^www\./, '');
+  url.pathname = url.pathname.replace(/\/$/, '') || '/';
+  for (const key of [...url.searchParams.keys()]) if (/^(utm_|gclid$|fbclid$|ref$)/i.test(key)) url.searchParams.delete(key);
+  url.searchParams.sort();
+  const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return [url.toString().replace(/^http:/, 'https:'),
+    // Exact normalized substantial excerpts also catch syndicated copies.
+    source.summary.length >= 80 ? `excerpt:${normalize(source.summary)}` : `publication:${url.hostname}:${normalize(source.title)}:${normalize(source.summary)}`];
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -230,14 +253,19 @@ export default async function handler(request, response) {
   ].filter(Boolean).join(' ').slice(0, 700);
 
   try {
-    const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery' }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery' }];
+    const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery', lane: 0, priority: 3 }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery', lane: 1, priority: 0 }];
     if (/\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`)) {
       // General suitability only: no quarry, frequency or personal circumstances
       // are introduced when those facts are absent from the saved context.
       searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
         'hunting suitability safety technical guidance authoritative sources'].filter(Boolean).join(' '),
-      subject: 'Saved hunting-purpose discovery' });
+      subject: 'Saved hunting-purpose discovery', lane: 2, priority: 2 });
     }
+    if (['15', '16'].includes(fields.licenceSection) && /\bskeet\b/i.test(fields.discipline)) searches.push({
+      query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
+        'Skeet discipline suitability technical equipment guidance recognized shooting organization'].filter(Boolean).join(' '),
+      subject: 'Saved Skeet equipment/suitability discovery', lane: 1, priority: 1,
+    });
     const responses = await Promise.all(searches.map(search => fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -288,7 +316,7 @@ export default async function handler(request, response) {
         sourceKind: 'EXTERNAL_PROVIDER',
         publishedDate: boundedText(result.published_date, 80) || null,
       }];
-    }).map(source => ({ source, score: relevanceScore(source, fields, group) }))
+    }).map(source => ({ source, score: relevanceScore(source, fields, searches[group].lane) }))
       .filter(item => item.score >= RELEVANCE_THRESHOLD)
       .sort((a, b) => b.score - a.score)
       .map(item => item.source));
@@ -296,16 +324,16 @@ export default async function handler(request, response) {
     // URLs without losing remaining unique results from either search.
     const sources = [], seen = new Set();
     const positions = groups.map(() => 0);
-    const groupOrder = ['15', '16'].includes(fields.licenceSection) ? [1, ...(groups.length > 2 ? [2] : []), 0] : groups.map((_, i) => i);
+    const groupOrder = groups.map((_, i) => i);
+    if (['15', '16'].includes(fields.licenceSection)) groupOrder.sort((a, b) => searches[a].priority - searches[b].priority);
     while (sources.length < 6 && groups.some((group, i) => positions[i] < group.length)) {
       for (const i of groupOrder) {
         if (sources.length >= 6) break;
         while (positions[i] < groups[i].length) {
           const source = groups[i][positions[i]++];
-          const key = new URL(source.url); key.hash = '';
-          key.pathname = key.pathname.replace(/\/$/, '') || '/'; key.searchParams.sort();
-          if (seen.has(key.toString())) continue;
-          seen.add(key.toString()); sources.push(source); break;
+          const keys = researchSourceKeys(source);
+          if (keys.some(key => seen.has(key))) continue;
+          keys.forEach(key => seen.add(key)); sources.push(source); break;
         }
       }
     }

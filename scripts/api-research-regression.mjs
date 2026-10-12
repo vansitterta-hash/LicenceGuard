@@ -9,6 +9,15 @@ const scoreSource = new Function(apiCode.slice(0, apiCode.indexOf('function cons
 const unknownFields = validateConfiguration({ purpose: 'Dedicated hunting and sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } });
 const scoredSource = (title, summary, publisher = 'example.test') => ({ title, summary, publisher });
 const knownFields = { ...unknownFields, firearmModel: 'Woodcock Deluxe, Over and Under' };
+for (const group of [0, 1, 2]) {
+  assert.ok(scoreSource(scoredSource('CZ Woodcock Deluxe 20 Gauge Over Under Shotgun', 'CZ Woodcock Deluxe barrel specifications for sporting use.'), knownFields, group) < 14, 'same model with wrong gauge is excluded');
+  assert.ok(scoreSource(scoredSource('CZ Drake 12 Gauge', 'CZ Drake specifications. Catalogue menu: Woodcock Deluxe 12 gauge Skeet hunting.'), knownFields, group) < 14, 'correct identity in menu cannot rescue wrong title subject');
+  assert.ok(scoreSource(scoredSource('Category - Shotguns', 'CZ Woodcock Deluxe 12 gauge shotgun barrel specifications and hunting use.'), knownFields, group) < 14);
+}
+const sourceKeys = new Function(apiCode.slice(0, apiCode.indexOf('export default')) + '; return researchSourceKeys;')();
+const duplicate = { title: 'Skeet rules', summary: 'Skeet rules require shotguns to engage crossing clay targets with equipment specified in the competition rules.', url: 'http://www.rules.test/skeet/?utm_source=search#equipment' };
+assert.equal(sourceKeys(duplicate)[0], sourceKeys({ ...duplicate, url: 'https://rules.test/skeet' })[0]);
+assert.equal(sourceKeys(duplicate)[1], sourceKeys({ ...duplicate, url: 'https://other.test/copied-rules' })[1]);
 for (const group of [0, 1, 2]) for (const title of ['CZ Drake 12 Gauge', 'CZ 1012 G2', 'Category - Shotguns']) {
   assert.ok(scoreSource(scoredSource(title, 'The CZ 12 gauge shotgun has technical barrel specifications for Skeet and hunting.'), knownFields, group) < 14, 'known model cannot accept another model or portfolio');
 }
@@ -25,6 +34,8 @@ assert.match(researchPanel, /variant=\{claimReviewed \? 'secondary' : 'danger'\}
 assert.match(researchPanel, /borderColor: claimReviewed \? Colors.success : Colors.warning/);
 assert.match(researchPanel, /claimReviewed && claim\?\.text.trim\(\) \? Colors.success : Colors.warning/);
 assert.match(researchPanel, /reviewed: !claimReviewed, sourceSnapshot/);
+assert.match(researchPanel, /title="Open original Research source"[^\n]+variant=\{claimReviewed \? 'ghost' : 'danger'\}/);
+assert.match(researchPanel, /Boolean\(claim\?\.reviewed && claim.text.trim\(\) && claim.sourceSnapshot === sourceSnapshot\)/);
 for (const group of [0, 1, 2]) {
   assert.ok(scoreSource(scoredSource('CZ All Terrain 1012 G2 shotgun', 'This CZ 12 gauge shotgun has a semi-automatic action and barrel specifications for sporting hunting use.'), unknownFields, group) < 14, 'unknown model must reject another named CZ model in every search');
   assert.ok(scoreSource(scoredSource('CZ shotgun catalogue', 'CZ shotguns include barrels, chokes, technical specifications and sporting hunting suitability. Menu shop cart subscribe newsletter dealer locator.'), unknownFields, group) < 14, 'catalogue keywords cannot establish a proposition');
@@ -81,7 +92,7 @@ try {
     if (url === 'https://api.tavily.com/search') {
       providerRequests.push({ url, options });
       const providerQuery = JSON.parse(options.body).query;
-      const purposeSearch = /discipline equipment|hunting suitability safety/.test(providerQuery);
+      const purposeSearch = /discipline equipment|discipline suitability|hunting suitability safety/.test(providerQuery);
       const searchGroup = /hunting suitability safety/.test(providerQuery) ? 2 : purposeSearch ? 1 : 0;
       return {
         ok: true,
@@ -89,7 +100,7 @@ try {
           usage: { credits: 1 },
           results: (resultOverrides && (resultOverrides[searchGroup] ?? resultOverrides[1])) ?? [
             { id: 'result-1', title: 'CZ 12 gauge shotgun specifications and skeet rules', url: 'https://example.test/firearm', content: 'The CZ 12 gauge shotgun has interchangeable chokes for skeet sporting use.', published_date: '2026-08-01' },
-            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: purposeSearch ? 'Skeet shotgun competition rules' : 'CZ 12 gauge shotgun technical specifications', url: `https://example.test/${purposeSearch ? 'sport' : 'technical'}/${i}`, content: 'The CZ 12 gauge shotgun uses interchangeable chokes for skeet competition targets.' })),
+            ...Array.from({ length: 6 }, (_, i) => ({ id: `result-${i}`, title: purposeSearch ? 'Skeet shotgun competition rules' : 'CZ 12 gauge shotgun technical specifications', url: `https://example.test/${purposeSearch ? 'sport' : 'technical'}/${i}`, content: `The CZ 12 gauge shotgun uses interchangeable chokes for skeet competition targets. ${purposeSearch ? 'Competition equipment provision' : 'Technical specification provision'} ${i + 1}.` })),
             { id: 'bad-url', title: 'Ignored scheme', url: 'javascript:alert(1)', content: 'Invalid URL result.' },
             { id: 'empty', title: 'Missing content', url: 'https://example.test/empty', content: '' },
           ],
@@ -131,7 +142,7 @@ try {
     firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN', firearmConfiguration: 'OVER_UNDER', serialNumber: '1165306' },
   }), response);
   assert.equal(response.statusCode, 200);
-  assert.equal(providerRequests.length, 2);
+  assert.equal(providerRequests.length, 3);
   assert.equal(providerRequests[0].options.headers.Authorization, 'Bearer server-only-test-key');
   assert.equal(providerRequests[0].options.body.includes('server-only-test-key'), false);
   const payload = JSON.parse(providerRequests[0].options.body);
@@ -155,7 +166,7 @@ try {
   assert.ok(response.body.sources.some(s => s.url.includes('/sport/')));
   assert.ok(response.body.sources.every(s => s.trustLevel === 'UNREVIEWED' && s.sourceKind === 'EXTERNAL_PROVIDER' && !Object.hasOwn(s, 'reviewed') && !Object.hasOwn(s, 'approved')));
   assert.equal(Object.hasOwn(response.body, 'claims'), false);
-  assert.equal(response.body.usage.credits, 2);
+  assert.equal(response.body.usage.credits, 3);
   assert.equal(response.body.applicationType, 'FIREARM_LICENCE_FIRST_APPLICATION');
   assert.equal(response.body.licenceSection, '16');
   assert.equal(response.body.purpose, 'Dedicated sport shooting');
@@ -168,8 +179,8 @@ try {
   await handler(request({ licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: 'Woodcock Deluxe, Over and Under', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } }), storedModel);
   assert.equal(storedModel.statusCode, 200);
   assert.equal(storedModel.body.firearm.firearmConfiguration, null, 'unknown configuration is not inferred from make/model');
-  assert.match(JSON.parse(providerRequests[2].options.body).query, /CZ "Woodcock Deluxe" 12 BR SHOTGUN/);
-  assert.match(JSON.parse(providerRequests[3].options.body).query, /skeet.*Over and Under/i);
+  assert.match(JSON.parse(providerRequests[3].options.body).query, /CZ "Woodcock Deluxe" 12 BR SHOTGUN/);
+  assert.match(JSON.parse(providerRequests[4].options.body).query, /skeet.*Over and Under/i);
   assert.equal(storedModel.body.firearm.model, 'Woodcock Deluxe, Over and Under', 'saved identity is retained verbatim; no canonical configuration inferred from description');
   const publication = (id, title, content) => ({ id, title, content, url: `https://example.test/${id}` });
   const navigation = publication('navigation', 'CZ shotgun specifications and Skeet rules', 'Home Contact us Log in Privacy policy Menu CZ shotgun manufacturer specifications skeet competition hunting rifle');
@@ -216,10 +227,11 @@ try {
   const gaugeSkeet = publication('gauge-skeet', '12-gauge Skeet equipment', '12Ga equipment rules for Skeet competition.');
   const shortHunting = publication('short-hunting', 'Shotgun hunting suitability', '12-bore chokes and game-bird hunting use.');
   const dualPurpose = { ...caseBody, discipline: 'Skeet AND hunting' };
-  resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, hunting, gaugeSkeet, shortHunting]];
+  resultOverrides = [[...physicalFailures, cz], [...physicalFailures, natshoot, { ...natshoot, url: `${natshoot.url}?utm_source=duplicate` }, { ...natshoot, url: 'https://syndicated.test/skeet-copy' }, hunting, gaugeSkeet, shortHunting]];
   const physical = createResponse(); await handler(request(dualPurpose), physical);
-  const huntingQuery = JSON.parse(providerRequests.at(-1).options.body).query;
-  assert.doesNotMatch(JSON.parse(providerRequests.at(-2).options.body).query, /hunting/i, 'Skeet and hunting searches are independent');
+  const huntingQuery = JSON.parse(providerRequests.findLast(r => /hunting suitability safety/.test(JSON.parse(r.options.body).query)).options.body).query;
+  assert.doesNotMatch(JSON.parse(providerRequests.at(-1).options.body).query, /hunting/i, 'Skeet suitability and hunting searches are independent');
+  assert.match(JSON.parse(providerRequests.at(-1).options.body).query, /Skeet discipline suitability/);
   assert.match(huntingQuery, /SHOTGUN.*12 BR SHOTGUN.*hunting suitability/);
   assert.doesNotMatch(huntingQuery, /quarry|game birds|frequency|experience|1012|semi.automatic/i);
   assert.equal(physical.statusCode, 200);
