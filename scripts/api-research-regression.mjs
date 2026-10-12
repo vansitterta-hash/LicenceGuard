@@ -8,7 +8,16 @@ const validateConfiguration = new Function(apiCode.slice(0, apiCode.indexOf('fun
 const scoreSource = new Function(apiCode.slice(0, apiCode.indexOf('function consumeRequest')) + '; return relevanceScore;')();
 const unknownFields = validateConfiguration({ purpose: 'Dedicated hunting and sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: null, calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } });
 const scoredSource = (title, summary, publisher = 'example.test') => ({ title, summary, publisher });
+const evaluateSource = new Function(apiCode.slice(0, apiCode.indexOf('function consumeRequest')) + '; return sourceEvaluation;')();
 const knownFields = { ...unknownFields, firearmModel: 'Woodcock Deluxe, Over and Under' };
+const owner = scoredSource('CZ Woodcock Deluxe 12 gauge owner review', 'I have used my CZ Woodcock Deluxe 12 gauge shotgun for Skeet and hunting. I tested handling and recoil during field use; the balance suits my practical shooting use.');
+assert.ok(scoreSource(owner, knownFields, 0) >= 14);
+assert.equal(evaluateSource(owner).classification, 'First-hand practical-experience candidate');
+assert.equal(evaluateSource(owner).byline, null, 'unknown author remains unknown');
+const expert = scoredSource('12 gauge shotgun hunting analysis', 'Author: Named Contributor. As a gunsmith I tested 12 gauge over and under shotgun handling and balance in hunting field use.');
+assert.ok(scoreSource(expert, knownFields, 2) >= 14);
+assert.match(evaluateSource(expert).classification, /expert-analysis.*unverified/);
+assert.ok(scoreSource(scoredSource('CZ Woodcock Deluxe owner review', 'CZ Woodcock Deluxe 12 gauge shotgun is amazing. I love it for Skeet and hunting.'), knownFields, 0) < 14);
 for (const group of [0, 1, 2]) {
   assert.ok(scoreSource(scoredSource('CZ Woodcock Deluxe 20 Gauge Over Under Shotgun', 'CZ Woodcock Deluxe barrel specifications for sporting use.'), knownFields, group) < 14, 'same model with wrong gauge is excluded');
   assert.ok(scoreSource(scoredSource('CZ Drake 12 Gauge', 'CZ Drake specifications. Catalogue menu: Woodcock Deluxe 12 gauge Skeet hunting.'), knownFields, group) < 14, 'correct identity in menu cannot rescue wrong title subject');
@@ -233,7 +242,8 @@ try {
   assert.doesNotMatch(JSON.parse(providerRequests.at(-1).options.body).query, /hunting/i, 'Skeet suitability and hunting searches are independent');
   assert.match(JSON.parse(providerRequests.at(-1).options.body).query, /Skeet discipline suitability/);
   assert.match(huntingQuery, /SHOTGUN.*12 BR SHOTGUN.*hunting suitability/);
-  assert.doesNotMatch(huntingQuery, /quarry|game birds|frequency|experience|1012|semi.automatic/i);
+  assert.match(huntingQuery, /upland game birds ducks geese quail snipe field experience/);
+  assert.doesNotMatch(huntingQuery, /applicant hunts|my hunting|frequency|1012|semi.automatic/i);
   assert.equal(physical.statusCode, 200);
   assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url, gaugeSkeet.url, shortHunting.url]));
   assert.equal(physical.body.sourceCount, 5, 'short descriptive excerpts qualify without every context term or a prescribed verb');

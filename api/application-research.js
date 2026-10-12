@@ -60,6 +60,20 @@ function subjectType(title, content, fields) {
 }
 
 const RELEVANCE_THRESHOLD = 14;
+function sourceEvaluation(source) {
+  const text = `${source.title} ${source.summary}`;
+  const technical = /\b(barrels?|chokes?|patterns?|recoil|balance|handling|trigger|equipment|gauge|bore)\b/i.test(source.summary);
+  const firstHand = /\bI (?:have |had )?(?:used|shot|fired|hunted|tested|owned)|\bmy (?:shotgun|gun)|\bour (?:field|range) test/i.test(source.summary);
+  const byline = source.summary.match(/\b(?:author|by)\s*:\s*([^.;\n|]+)/i)?.[1]?.trim() ?? null;
+  const declaredExpertise = /\b(gunsmith|competitive shooter|gun writer|shooting instructor|experienced hunter)\b/i.test(source.summary);
+  const rules = /\b(rules|regulations|specifications)\b/i.test(text);
+  const institutional = /\.(?:gov|org)(?:\.[a-z]{2})?$/i.test(source.publisher ?? '');
+  const classification = rules && institutional ? 'Rules/technical source candidate'
+    : byline && declaredExpertise && technical ? 'Attributed expert-analysis candidate (credentials unverified)'
+      : firstHand && technical ? 'First-hand practical-experience candidate'
+        : technical ? 'Technical-analysis candidate' : 'Unsupported opinion';
+  return { classification, byline, firstHand, technical };
+}
 // Discovery relevance is not fact verification or claim approval. Evaluate only
 // the supplied title/excerpt; unrelated results never pad the source budget.
 function relevanceScore(source, fields, group) {
@@ -110,7 +124,7 @@ function relevanceScore(source, fields, group) {
   const sourcePath = (() => { try { return new URL(source.url).pathname; } catch { return ''; } })();
   if (/\b(?:top|best)\s+(?:\d+\s+)?(?:best\s+)?(?:12\s+gauge\s+)?shotguns?\b/.test(title)
     || /\b(category|categories|portfolio|showcase|buying guide|search results)\b/.test(title)
-    || /\b(review|reviews|buy|sale|deals|catalogue|catalog|products)\b/.test(title)
+    || /\b(buy|sale|deals|catalogue|catalog|products)\b/.test(title)
     || (/\/(?:product|products)(?:\/|$)/i.test(sourcePath) && !(model && /\b(specifications?|technical|barrels?|chokes?)\b/.test(content)))
     || /\/(?:shop|catalog|catalogue|category)(?:\/|$)/i.test(sourcePath)
     || (make && /\/(?:shotguns|shotgun)\/?$/i.test(sourcePath))
@@ -125,11 +139,15 @@ function relevanceScore(source, fields, group) {
   if (make && !fields.firearmModel && !fields.firearmConfiguration
     && /\b(semi automatic|over and under|over under|side by side|pump action)\b/.test(text)) return -100;
   if (/\b(best in class|ultimate|unmatched|buy now|shop now)\b/.test(content)) return -100;
+  const evaluation = sourceEvaluation(source);
+  if (/\b(review|reviews|forum|opinion)\b/.test(title)
+    && (!evaluation.technical || (!evaluation.firstHand && !evaluation.byline))) return -100;
   const categoryFound = categoryMatch(text), gauge = gaugeMatch(text);
   const technical = /\b(manufacturer|specifications?|technical|barrels?|chokes?|action|production|history|manufactured|design)\b/.test(content);
   const disciplines = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
   const discipline = disciplines.some(value => value !== 'hunting' && contains(text, value));
-  const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`) && /\bhunting\b/.test(text);
+  const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`)
+    && /\bhunting\b|\bupland game birds?\b|\bwaterfowl\b|\bbird hunting\b/.test(text);
   if (sportingPurpose && group === 1 && disciplines.some(value => value !== 'hunting') && !discipline) return -100;
   if (sportingPurpose && group === 2 && !hunting) return -100;
   const use = /\b(targets?|clays?|competition|rules?|equipment|game|sporting|suitability|hunting)\b/.test(content);
@@ -172,6 +190,7 @@ function relevanceScore(source, fields, group) {
   if (navigationTerms.length >= 3 && navigationTerms.length * 5 >= words) return -100;
   // Prefer attributable technical/rules material, without approving its claims.
   if (/\.(?:gov|org)(?:\.[a-z]{2})?$/i.test(source.publisher ?? '') && /\b(rules|technical|equipment|safety)\b/.test(content)) score += 3;
+  if (evaluation.firstHand && evaluation.technical) score += 2;
   return score;
 }
 
@@ -258,7 +277,7 @@ export default async function handler(request, response) {
       // General suitability only: no quarry, frequency or personal circumstances
       // are introduced when those facts are absent from the saved context.
       searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
-        'hunting suitability safety technical guidance authoritative sources'].filter(Boolean).join(' '),
+        'hunting suitability safety technical guidance upland game birds ducks geese quail snipe field experience hunting publications organizations'].filter(Boolean).join(' '),
       subject: 'Saved hunting-purpose discovery', lane: 2, priority: 2 });
     }
     if (['15', '16'].includes(fields.licenceSection) && /\bskeet\b/i.test(fields.discipline)) searches.push({
@@ -306,7 +325,7 @@ export default async function handler(request, response) {
         trustLevel: 'UNREVIEWED',
         subjectType: subjectType(title, summary, fields),
         summary,
-        applicability: `${searches[group].subject} for the supplied context. Verify the original source and its relevance before relying on any claim.`,
+        applicability: `${searches[group].subject} for the supplied context. ${sourceEvaluation({ title, summary, publisher: url.hostname }).classification}. Author expertise and corroboration require independent review. First-hand observations do not establish specifications, legal requirements or applicant activities. Hunting species are discovery topics, not saved applicant facts. Verify the original source and the specific proposition before relying on any claim.`,
         category: 'Live internet research',
         association: fields.association || null,
         discipline: fields.discipline || null,
