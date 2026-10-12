@@ -77,6 +77,10 @@ function sourceEvaluation(source) {
 // Discovery relevance is not fact verification or claim approval. Evaluate only
 // the supplied title/excerpt; unrelated results never pad the source budget.
 function relevanceScore(source, fields, group) {
+  const host = (source.publisher ?? '').toLowerCase().replace(/^www\./, '');
+  if (/(^|\.)(reddit\.com|redd\.it|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com|quora\.com)$/.test(host)
+    || /\b(forum|forums|owner review|user review|customer review)\b/i.test(`${source.title} ${source.url ?? ''}`)
+    || /\/(?:forum|forums|threads|comments)\//i.test(source.url ?? '')) return -100;
   const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const title = normalize(source.title), content = normalize(source.summary);
   const text = `${title} ${content}`;
@@ -140,6 +144,7 @@ function relevanceScore(source, fields, group) {
     && /\b(semi automatic|over and under|over under|side by side|pump action)\b/.test(text)) return -100;
   if (/\b(best in class|ultimate|unmatched|buy now|shop now)\b/.test(content)) return -100;
   const evaluation = sourceEvaluation(source);
+  if (/\b(review|reviews|opinion)\b/.test(title) && evaluation.firstHand) return -100;
   if (/\b(review|reviews|forum|opinion)\b/.test(title)
     && (!evaluation.technical || (!evaluation.firstHand && !evaluation.byline))) return -100;
   const categoryFound = categoryMatch(text), gauge = gaugeMatch(text);
@@ -216,6 +221,25 @@ function researchSourceKeys(source) {
     source.summary.length >= 80 ? `excerpt:${normalize(source.summary)}` : `publication:${url.hostname}:${normalize(source.title)}:${normalize(source.summary)}`];
 }
 
+function selectResearchSources(groups, searches, licenceSection) {
+  // Allocate by evidence purpose, not query count: rules and equipment both
+  // belong to the sporting lane and must not get two turns before hunting.
+  const sporting = ['15', '16'].includes(licenceSection);
+  const lanes = sporting ? [1, 2, 0] : [...new Set(searches.map(search => search.lane))];
+  const buckets = lanes.map(lane => groups.flatMap((group, index) => searches[index].lane === lane ? group : []));
+  const positions = buckets.map(() => 0), sources = [], seen = new Set();
+  while (sources.length < 6 && buckets.some((bucket, i) => positions[i] < bucket.length)) {
+    for (let i = 0; i < buckets.length && sources.length < 6; i++) {
+      while (positions[i] < buckets[i].length) {
+        const source = buckets[i][positions[i]++], keys = researchSourceKeys(source);
+        if (keys.some(key => seen.has(key))) continue;
+        keys.forEach(key => seen.add(key)); sources.push(source); break;
+      }
+    }
+  }
+  return sources;
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -252,14 +276,17 @@ export default async function handler(request, response) {
   const shotgunAlias = /shotgun/i.test(fields.firearmType) && /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre) ? '12 bore 12 gauge' : '';
   const recordedConfiguration = fields.firearmConfiguration === 'OTHER' ? fields.firearmConfigurationOther : fields.firearmConfiguration.replaceAll('_', ' ');
   const recordedDescription = fields.firearmModel.includes(',') ? fields.firearmModel.slice(fields.firearmModel.indexOf(',') + 1).trim() : '';
+  // Translate the recorded gauge notation for discovery, without changing the
+  // saved context. BR SHOTGUN is an application label, not useful search prose.
+  const searchCalibre = fields.calibre.replace(/^(\d+)\s*(?:BR(?:\s+SHOTGUN)?|BORE|GAUGE|GA)\s*$/i, '$1 gauge');
   const firearmQuery = [
     fields.firearmMake,
     fields.firearmModel ? `"${fields.firearmModel.split(',')[0].trim()}"` : '',
-    fields.calibre,
+    searchCalibre,
     fields.firearmType,
     recordedConfiguration, recordedDescription,
     shotgunAlias,
-    'manufacturer specifications technical characteristics firearm history production background sporting suitability',
+    'manufacturer manual archived technical specifications',
   ].filter(Boolean).join(' ').slice(0, 700);
   const purposeQuery = [
     // Keep a saved discipline search focused; hunting gets its own search below.
@@ -276,9 +303,12 @@ export default async function handler(request, response) {
     if (/\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`)) {
       // General suitability only: no quarry, frequency or personal circumstances
       // are introduced when those facts are absent from the saved context.
-      searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
-        'hunting suitability safety technical guidance upland game birds ducks geese quail snipe field experience hunting publications organizations'].filter(Boolean).join(' '),
+      searches.push({ query: [searchCalibre, fields.firearmType, recordedConfiguration, recordedDescription,
+        'hunting suitability safety technical guidance field use recognized hunting organizations publications'].filter(Boolean).join(' '),
       subject: 'Saved hunting-purpose discovery', lane: 2, priority: 2 });
+      searches.push({ query: [searchCalibre, fields.firearmType, recordedConfiguration, recordedDescription,
+        'hunting educational guidance conservation authority shotgun suitability'].filter(Boolean).join(' '),
+      subject: 'Saved hunting-purpose educational/organization discovery', lane: 2, priority: 2 });
     }
     if (['15', '16'].includes(fields.licenceSection) && /\bskeet\b/i.test(fields.discipline)) searches.push({
       query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
@@ -341,21 +371,7 @@ export default async function handler(request, response) {
       .map(item => item.source));
     // Alternate subjects within the existing six-source budget. Skip duplicate
     // URLs without losing remaining unique results from either search.
-    const sources = [], seen = new Set();
-    const positions = groups.map(() => 0);
-    const groupOrder = groups.map((_, i) => i);
-    if (['15', '16'].includes(fields.licenceSection)) groupOrder.sort((a, b) => searches[a].priority - searches[b].priority);
-    while (sources.length < 6 && groups.some((group, i) => positions[i] < group.length)) {
-      for (const i of groupOrder) {
-        if (sources.length >= 6) break;
-        while (positions[i] < groups[i].length) {
-          const source = groups[i][positions[i]++];
-          const keys = researchSourceKeys(source);
-          if (keys.some(key => seen.has(key))) continue;
-          keys.forEach(key => seen.add(key)); sources.push(source); break;
-        }
-      }
-    }
+    const sources = selectResearchSources(groups, searches, fields.licenceSection);
     const usage = {};
     for (const payload of payloads) for (const [key, value] of Object.entries(payload.usage ?? {})) {
       if (typeof value === 'number') usage[key] = (usage[key] ?? 0) + value;

@@ -11,9 +11,11 @@ const scoredSource = (title, summary, publisher = 'example.test') => ({ title, s
 const evaluateSource = new Function(apiCode.slice(0, apiCode.indexOf('function consumeRequest')) + '; return sourceEvaluation;')();
 const knownFields = { ...unknownFields, firearmModel: 'Woodcock Deluxe, Over and Under' };
 const owner = scoredSource('CZ Woodcock Deluxe 12 gauge owner review', 'I have used my CZ Woodcock Deluxe 12 gauge shotgun for Skeet and hunting. I tested handling and recoil during field use; the balance suits my practical shooting use.');
-assert.ok(scoreSource(owner, knownFields, 0) >= 14);
+assert.ok(scoreSource(owner, knownFields, 0) < 14, 'latest policy excludes owner reviews from Motivation candidate evidence');
 assert.equal(evaluateSource(owner).classification, 'First-hand practical-experience candidate');
 assert.equal(evaluateSource(owner).byline, null, 'unknown author remains unknown');
+for (const publisher of ['reddit.com', 'old.reddit.com', 'facebook.com', 'quora.com']) assert.ok(scoreSource({ ...owner, title: 'CZ Woodcock Deluxe 12 gauge technical specifications', publisher }, knownFields, 0) < 14);
+assert.ok(scoreSource({ ...owner, title: 'CZ Woodcock Deluxe 12 gauge', url: 'https://shooting.test/forums/woodcock' }, knownFields, 0) < 14);
 const expert = scoredSource('12 gauge shotgun hunting analysis', 'Author: Named Contributor. As a gunsmith I tested 12 gauge over and under shotgun handling and balance in hunting field use.');
 assert.ok(scoreSource(expert, knownFields, 2) >= 14);
 assert.match(evaluateSource(expert).classification, /expert-analysis.*unverified/);
@@ -24,6 +26,13 @@ for (const group of [0, 1, 2]) {
   assert.ok(scoreSource(scoredSource('Category - Shotguns', 'CZ Woodcock Deluxe 12 gauge shotgun barrel specifications and hunting use.'), knownFields, group) < 14);
 }
 const sourceKeys = new Function(apiCode.slice(0, apiCode.indexOf('export default')) + '; return researchSourceKeys;')();
+const selectSources = new Function(apiCode.slice(0, apiCode.indexOf('export default')) + '; return selectResearchSources;')();
+const candidates = (prefix, count) => Array.from({ length: count }, (_, i) => ({ title: `${prefix} ${i}`, summary: `${prefix} discrete supported proposition ${i}`, url: `https://credible.test/${prefix}/${i}` }));
+const covered = selectSources([candidates('model', 3), candidates('skeet-rules', 8), candidates('hunting', 3), candidates('skeet-equipment', 8)], [{ lane: 0 }, { lane: 1 }, { lane: 2 }, { lane: 1 }], '16');
+assert.equal(covered.length, 6);
+assert.equal(covered.filter(s => s.url.includes('/hunting/')).length, 2, 'many Skeet results cannot crowd out credible hunting');
+assert.equal(covered.filter(s => s.url.includes('/model/')).length, 2);
+assert.equal(selectSources([[], candidates('skeet-rules', 2), [], []], [{ lane: 0 }, { lane: 1 }, { lane: 2 }, { lane: 1 }], '16').length, 2, 'no fabricated hunting/model substitutes');
 const duplicate = { title: 'Skeet rules', summary: 'Skeet rules require shotguns to engage crossing clay targets with equipment specified in the competition rules.', url: 'http://www.rules.test/skeet/?utm_source=search#equipment' };
 assert.equal(sourceKeys(duplicate)[0], sourceKeys({ ...duplicate, url: 'https://rules.test/skeet' })[0]);
 assert.equal(sourceKeys(duplicate)[1], sourceKeys({ ...duplicate, url: 'https://other.test/copied-rules' })[1]);
@@ -101,8 +110,8 @@ try {
     if (url === 'https://api.tavily.com/search') {
       providerRequests.push({ url, options });
       const providerQuery = JSON.parse(options.body).query;
-      const purposeSearch = /discipline equipment|discipline suitability|hunting suitability safety/.test(providerQuery);
-      const searchGroup = /hunting suitability safety/.test(providerQuery) ? 2 : purposeSearch ? 1 : 0;
+      const purposeSearch = /discipline equipment|discipline suitability|hunting suitability safety|hunting educational guidance/.test(providerQuery);
+      const searchGroup = /hunting suitability safety|hunting educational guidance/.test(providerQuery) ? 2 : purposeSearch ? 1 : 0;
       return {
         ok: true,
         json: async () => ({
@@ -159,7 +168,7 @@ try {
   assert.equal(payload.max_results, 6);
   assert.equal(payload.include_answer, false);
   const purposePayload = JSON.parse(providerRequests[1].options.body);
-  assert.match(payload.query, /CZ.*12 BR SHOTGUN.*SHOTGUN.*12 bore 12 gauge/);
+  assert.match(payload.query, /CZ.*12 gauge.*SHOTGUN.*12 bore 12 gauge/);
   assert.doesNotMatch(payload.query, /skeet|Section 16|Sport Association|Dedicated sport|1165306|Beretta|1301|South Africa/);
   assert.equal(Object.hasOwn(payload, 'country'), false);
   assert.match(purposePayload.query, /skeet.*SHOTGUN.*12 BR SHOTGUN.*governing body/);
@@ -188,7 +197,7 @@ try {
   await handler(request({ licenceSection: '16', purpose: 'Dedicated sport shooting', discipline: 'Skeet', firearm: { make: 'CZ', model: 'Woodcock Deluxe, Over and Under', calibre: '12 BR SHOTGUN', firearmType: 'SHOTGUN' } }), storedModel);
   assert.equal(storedModel.statusCode, 200);
   assert.equal(storedModel.body.firearm.firearmConfiguration, null, 'unknown configuration is not inferred from make/model');
-  assert.match(JSON.parse(providerRequests[3].options.body).query, /CZ "Woodcock Deluxe" 12 BR SHOTGUN/);
+  assert.match(JSON.parse(providerRequests[3].options.body).query, /CZ "Woodcock Deluxe" 12 gauge/);
   assert.match(JSON.parse(providerRequests[4].options.body).query, /skeet.*Over and Under/i);
   assert.equal(storedModel.body.firearm.model, 'Woodcock Deluxe, Over and Under', 'saved identity is retained verbatim; no canonical configuration inferred from description');
   const publication = (id, title, content) => ({ id, title, content, url: `https://example.test/${id}` });
@@ -241,8 +250,10 @@ try {
   const huntingQuery = JSON.parse(providerRequests.findLast(r => /hunting suitability safety/.test(JSON.parse(r.options.body).query)).options.body).query;
   assert.doesNotMatch(JSON.parse(providerRequests.at(-1).options.body).query, /hunting/i, 'Skeet suitability and hunting searches are independent');
   assert.match(JSON.parse(providerRequests.at(-1).options.body).query, /Skeet discipline suitability/);
-  assert.match(huntingQuery, /SHOTGUN.*12 BR SHOTGUN.*hunting suitability/);
-  assert.match(huntingQuery, /upland game birds ducks geese quail snipe field experience/);
+  assert.match(huntingQuery, /12 gauge.*SHOTGUN.*hunting suitability/);
+  assert.ok(providerRequests.some(r => /12 gauge.*hunting educational guidance/.test(JSON.parse(r.options.body).query)), 'independent organization/educational hunting retrieval');
+  assert.match(huntingQuery, /field use recognized hunting organizations/);
+  assert.doesNotMatch(huntingQuery, /ducks|geese|quail|snipe|upland|ammunition/i);
   assert.doesNotMatch(huntingQuery, /applicant hunts|my hunting|frequency|1012|semi.automatic/i);
   assert.equal(physical.statusCode, 200);
   assert.deepEqual(new Set(physical.body.sources.map(s => s.url)), new Set([cz.url, natshoot.url, hunting.url, gaugeSkeet.url, shortHunting.url]));
