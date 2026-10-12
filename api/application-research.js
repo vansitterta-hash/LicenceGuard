@@ -73,13 +73,44 @@ function relevanceScore(source, fields, group) {
   const categoryMatch = text => contains(text, category) || contains(text, `${category}s`) || (category === 'handgun' && /\b(pistols?|revolvers?)\b/.test(text));
   const gaugeMatch = text => /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre)
     ? /\b12\s*(?:bore|gauge|ga|br)\b/.test(text) : contains(text, fields.calibre);
-  const make = contains(text, fields.firearmMake), model = contains(text, fields.firearmModel);
+  // A comma-separated user description is retained in context, but must not
+  // require sources to repeat that description as part of the model name.
+  const modelName = fields.firearmModel.split(',')[0].trim();
+  const make = contains(text, fields.firearmMake), model = contains(text, modelName);
+  if (modelName && group === 0 && (!make || !model)) return -100;
+  // Named-maker material in a purpose result must also match the recorded
+  // model. General discipline/category sources need no maker/model mention.
+  if (modelName && make && !model) return -100;
+  const sportingPurpose = ['15', '16'].includes(fields.licenceSection);
+  // Product titles often contain an unlabelled model name (for example Drake).
+  // With no recorded model, accept only generic maker/category title words,
+  // rather than maintaining a guessed list of model names.
+  if (!fields.firearmModel && make) {
+    const genericTitle = normalize(fields.firearmMake).split(' ').concat(
+      ['12', '20', '28', '410', 'gauge', 'bore', 'ga', 'br', 'shotgun', 'shotguns',
+        'rifle', 'rifles', 'handgun', 'pistol', 'revolver', 'specifications', 'technical',
+        'characteristics', 'production', 'history', 'manufacturer', 'manufacturing',
+        'background', 'equipment', 'rules', 'skeet', 'sporting', 'hunting', 'and', 'for', 'of', 'the']);
+    if (contains(title, fields.firearmMake) && title.split(' ').some(word => !genericTitle.includes(word))) return -100;
+    const makerMentions = ` ${content} `.split(` ${normalize(fields.firearmMake)} `);
+    if (makerMentions.slice(1).some(passage => {
+      const next = passage.split(' ')[0];
+      return !genericTitle.includes(next) && !['is', 'are', 'was', 'were', 'has', 'have', 'uses', 'used', 'manufactures', 'manufactured', 'produces', 'produced'].includes(next);
+    })) return -100;
+  }
+  const sourcePath = (() => { try { return new URL(source.url).pathname; } catch { return ''; } })();
+  if (/\b(?:top|best)\s+(?:\d+\s+)?(?:best\s+)?(?:12\s+gauge\s+)?shotguns?\b/.test(title)
+    || /\b(review|reviews|buy|sale|deals|catalogue|catalog|products)\b/.test(title)
+    || (/\/(?:product|products)(?:\/|$)/i.test(sourcePath) && !(model && /\b(specifications?|technical|barrels?|chokes?)\b/.test(content)))
+    || /\/(?:shop|catalog|catalogue|category)(?:\/|$)/i.test(sourcePath)
+    || (make && /\/(?:shotguns|shotgun)\/?$/i.test(sourcePath))
+    || /^\w+ shotguns?$/.test(title)) return -100;
   // A named model is not evidence for an unidentified firearm. Apply this to
   // every discovery group so a purpose search cannot bypass identity checks.
   const labelledModel = source.summary.match(/\bmodel\s*:\s*([^.;\n|]+)/i);
   const modelTitle = make && /\b(?:\d{3,}[a-z]*|[a-z]+\d+|g\d+)\b/i.test(title);
-  if ((labelledModel && (!fields.firearmModel || !contains(normalize(labelledModel[1]), fields.firearmModel)))
-    || (modelTitle && (!fields.firearmModel || !contains(title, fields.firearmModel)))) return -100;
+  if ((labelledModel && (!modelName || !contains(normalize(labelledModel[1]), modelName)))
+    || (modelTitle && (!modelName || !contains(title, modelName)))) return -100;
   if (/\b(catalogue|catalog|newsletter|dealer locator|find a dealer)\b/i.test(title)) return -100;
   if (make && !fields.firearmModel && !fields.firearmConfiguration
     && /\b(semi automatic|over and under|over under|side by side|pump action)\b/.test(text)) return -100;
@@ -89,6 +120,8 @@ function relevanceScore(source, fields, group) {
   const disciplines = fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(Boolean);
   const discipline = disciplines.some(value => value !== 'hunting' && contains(text, value));
   const hunting = /\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`) && /\bhunting\b/.test(text);
+  if (sportingPurpose && group === 1 && disciplines.some(value => value !== 'hunting') && !discipline) return -100;
+  if (sportingPurpose && group === 2 && !hunting) return -100;
   const use = /\b(targets?|clays?|competition|rules?|equipment|game|sporting|suitability|hunting)\b/.test(content);
   // Additive evidence: no fixed sentence length, mandatory verb, same-passage
   // conjunction or mandatory CZ/Section 16 term for useful category research.
@@ -109,7 +142,7 @@ function relevanceScore(source, fields, group) {
   if (conflict(title) || conflict(content)) score -= 40;
   const labelledIdentity = source.summary.match(/\b(?:manufacturer|make|model)\s*:\s*([^.;\n|]+)/i);
   if (labelledIdentity) {
-    const recorded = /model/i.test(labelledIdentity[0].split(':')[0]) ? fields.firearmModel : fields.firearmMake;
+    const recorded = /model/i.test(labelledIdentity[0].split(':')[0]) ? modelName : fields.firearmMake;
     if (recorded && !contains(normalize(labelledIdentity[1]), recorded)) score -= 40;
   }
   const labelledDiscipline = source.summary.match(/\bdiscipline\s*:\s*([^.;\n|]+)/i);
@@ -175,42 +208,42 @@ export default async function handler(request, response) {
   if (!consumeRequest(authenticatedUser.id)) return sendError(response, 429, 'Research rate limit reached. Try again later.');
 
   const shotgunAlias = /shotgun/i.test(fields.firearmType) && /^12\s*(?:br|bore|ga(?:uge)?)(?:\s|$)/i.test(fields.calibre) ? '12 bore 12 gauge' : '';
+  const recordedConfiguration = fields.firearmConfiguration === 'OTHER' ? fields.firearmConfigurationOther : fields.firearmConfiguration.replaceAll('_', ' ');
+  const recordedDescription = fields.firearmModel.includes(',') ? fields.firearmModel.slice(fields.firearmModel.indexOf(',') + 1).trim() : '';
   const firearmQuery = [
     fields.firearmMake,
-    fields.firearmModel,
+    fields.firearmModel ? `"${fields.firearmModel.split(',')[0].trim()}"` : '',
     fields.calibre,
     fields.firearmType,
-    fields.firearmConfiguration === 'OTHER' ? fields.firearmConfigurationOther : fields.firearmConfiguration.replaceAll('_', ' '),
+    recordedConfiguration, recordedDescription,
     shotgunAlias,
     'manufacturer specifications technical characteristics firearm history production background sporting suitability',
   ].filter(Boolean).join(' ').slice(0, 700);
   const purposeQuery = [
-    fields.licenceSection ? `Section ${fields.licenceSection}` : '',
-    fields.applicationType,
     // Keep a saved discipline search focused; hunting gets its own search below.
     fields.discipline ? '' : fields.purpose,
     fields.discipline.toLowerCase().split(/\s*(?:\band\b|[&,/])\s*/).filter(value => value && value !== 'hunting').join(' '),
-    fields.association,
     fields.firearmType,
     fields.calibre, shotgunAlias,
+    recordedConfiguration, recordedDescription,
     'discipline equipment competition rules technical governing body official sources',
   ].filter(Boolean).join(' ').slice(0, 700);
 
   try {
-    const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery' }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery', country: 'south africa' }];
+    const searches = [{ query: firearmQuery, subject: 'Firearm-specific discovery' }, { query: purposeQuery, subject: 'Application-purpose/discipline discovery' }];
     if (/\bhunting\b/i.test(`${fields.purpose} ${fields.discipline}`)) {
       // General suitability only: no quarry, frequency or personal circumstances
       // are introduced when those facts are absent from the saved context.
-      searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias,
-        'hunting suitability ammunition safety technical guidance authoritative sources'].filter(Boolean).join(' '),
-      subject: 'Saved hunting-purpose discovery', country: 'south africa' });
+      searches.push({ query: [fields.firearmType, fields.calibre, shotgunAlias, recordedConfiguration, recordedDescription,
+        'hunting suitability safety technical guidance authoritative sources'].filter(Boolean).join(' '),
+      subject: 'Saved hunting-purpose discovery' });
     }
     const responses = await Promise.all(searches.map(search => fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: search.query,
-        search_depth: 'basic',
+        search_depth: 'advanced',
         topic: 'general',
         ...(search.country ? { country: search.country } : {}),
         max_results: 6,
@@ -263,8 +296,10 @@ export default async function handler(request, response) {
     // URLs without losing remaining unique results from either search.
     const sources = [], seen = new Set();
     const positions = groups.map(() => 0);
+    const groupOrder = ['15', '16'].includes(fields.licenceSection) ? [1, ...(groups.length > 2 ? [2] : []), 0] : groups.map((_, i) => i);
     while (sources.length < 6 && groups.some((group, i) => positions[i] < group.length)) {
-      for (let i = 0; i < groups.length && sources.length < 6; i++) {
+      for (const i of groupOrder) {
+        if (sources.length >= 6) break;
         while (positions[i] < groups[i].length) {
           const source = groups[i][positions[i]++];
           const key = new URL(source.url); key.hash = '';

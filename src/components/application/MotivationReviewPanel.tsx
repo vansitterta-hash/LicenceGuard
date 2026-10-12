@@ -80,11 +80,11 @@ export default function MotivationReviewPanel({ identity, onChanged }: Props) {
       return <View key={`${source.documentId}:${source.id}`}>
         {index === currentSources.length && previousSources.length > 0 && <Text style={textStyle}>Previous Research / Research history — retained separately from Current Research. Existing reviewed claims keep their original provenance and review state.</Text>}
         <Text style={textStyle}>{source.documentId === runs.current?.document.id ? 'Current Research' : 'Previous Research'} · Run: {([runs.current, ...runs.previous].find(run => run?.document.id === source.documentId))?.generatedAt ?? 'Date unavailable'}</Text>
-        <Text style={textStyle}>{source.title} — {claimReviewed && claim?.text.trim() ? 'Reviewed claim eligible for inclusion' : 'Claim requires review; excluded until reviewed'}</Text>
+        <Text style={[textStyle, { color: claimReviewed && claim?.text.trim() ? Colors.success : Colors.warning }]}>{source.title} — {claimReviewed && claim?.text.trim() ? 'Reviewed claim eligible for inclusion' : 'Claim requires review; excluded until reviewed'}</Text>
         <Button title="Open original Research source" disabled={busy} variant="ghost" onPress={() => void run(() => openExternalDocument(() => source.url!, { originatingRoute: 'ApplicationReadiness', workflowStep: 'motivation-research' }), false)} />
         <TextField editable={!busy} label="Supported claim" multiline maxLength={3000} value={claim?.text ?? source.summary ?? ''} onChangeText={text => change({ text, reviewed: false })} />
         {collector && <View>{['Firearm relevance', ...COLLECTOR_CLAIM_SECTIONS].map(section => <Button key={section} disabled={busy} variant="ghost" title={`${(claim?.section ?? 'Firearm relevance') === section ? '✓ ' : ''}${section}`} onPress={() => change({ section })} />)}</View>}
-        <Button disabled={busy} variant="secondary" title={`${claimReviewed ? '✓ ' : ''}I reviewed the original source and this claim’s firearm/applicant relevance`} onPress={() => change({ reviewed: !claimReviewed, sourceSnapshot })} />
+        <Button disabled={busy} variant={claimReviewed ? 'secondary' : 'danger'} style={{ borderColor: claimReviewed ? Colors.success : Colors.warning }} title={`${claimReviewed ? '✓ ' : ''}I reviewed the original source and this claim’s firearm/applicant relevance`} onPress={() => change({ reviewed: !claimReviewed, sourceSnapshot })} />
       </View>;
     })}
     {collector && <View>
